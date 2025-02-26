@@ -1,0 +1,19 @@
+<<<<<<< HEAD
+streamlit
+xmlsec
+cryptography
+lxml
+xmlschema
+pandas
+rdflib
+requests
+=======
+streamlit
+xmlsec
+cryptography
+lxml
+xmlschema
+pandas
+rdflib
+requests
+>>>>>>> a498895ef3e67157c22497dc903bb51840f2a56d
