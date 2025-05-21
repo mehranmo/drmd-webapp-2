@@ -1,110 +1,113 @@
-import re
-import math
-import streamlit as st
-import xml.etree.ElementTree as ET
+# app.py (partial) – Admin rev 3 (XML‑load + tweaks) up to Properties tab
+# -----------------------------------------------------------------------------
+# Imports (include every lib used elsewhere so later tabs keep working)
+import re, math, uuid, base64, functools, traceback, io
 from datetime import date
-import pandas as pd
-import xmlschema
-
-import streamlit as st
-import pandas as pd
-import xml.etree.ElementTree as ET
 from xml.dom import minidom
+import xml.etree.ElementTree as ET
+
+import pandas as pd
+import streamlit as st
+import xmlschema
 from rdflib import Graph, Namespace
-import functools
-import uuid
-import base64
-import traceback
 
-
-# Set page layout to wide.
-st.set_page_config(layout="wide")
-
-# Use lxml for XSLT transformation and pretty printing.
+# pretty‑print / XSLT (used in Export tab later)
 try:
     from lxml import etree
 except ImportError:
     st.error("lxml is required. Please install it via pip install lxml.")
 
-# Inject custom CSS so that tables span the full width.
-st.markdown("""
-<style>
-table {
-    width: 100% !important;
-}
-div[data-baseweb="table"] {
-    width: 100% !important;
-}
-</style>
-""", unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# Page config & global CSS tweaks (consistent typography)
+st.set_page_config(layout="wide")
 
+st.markdown(
+    """
+    <style>
+      /* expander header ≈ MD h5 */
+      details > summary {font-size:1.17rem !important; font-weight:600;}
+      /* widget labels ≈ MD h6 */
+      label, .stTextInput label, .stSelectbox label {font-size:0.9rem !important;}
+      /* tighter buttons for small icon buttons */
+      button.small-btn>div {padding:0.25rem 0.5rem !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-
-import re
-
-def clean_text(text):
-    return re.sub(r'\s+', ' ', text).strip()
-
-# ------------------------------
-# Helper: xs:duration hint
-# ------------------------------
-def xs_duration_hint():
-    return "Enter a valid xs:duration (e.g. P2Y6M for 2 years 6 months)"
-
-# ------------------------------
-# Helper: Data Editor that updates the DataFrame in session_state.
-# Accepts extra keyword arguments.
-# ------------------------------
-def data_editor_df(df, key, **kwargs):
-    try:
-        updated_df = st.data_editor(df, key=key, **kwargs)
-    except TypeError:
-        updated_df = st.data_editor(df, key=key)
-    if key in st.session_state and hasattr(st.session_state[key], "edited_rows"):
-        edits = st.session_state[key].edited_rows  # Format: {row_index: {column: new_value}}
-        df_updated = df.copy()
-        for row_str, changes in edits.items():
-            try:
-                idx = int(row_str)
-                for col, new_val in changes.items():
-                    df_updated.at[idx, col] = new_val
-            except Exception as e:
-                st.error(f"Error updating row {row_str}: {e}")
-        return df_updated
-    return updated_df
-
-# ------------------------------
-# Constants & Default Paths
-# ------------------------------
+# -----------------------------------------------------------------------------
+# Helpers & constants
 DEFAULT_XSD_PATH = "./drmd.xsd"
 DEFAULT_XSL_PATH = "./drmd.xsl"
 DS_NS = "http://www.w3.org/2000/09/xmldsig#"
-ALLOWED_TITLES = ["productInformationSheet", "referenceMaterialCertificate"]
+ALLOWED_TITLES = ["referenceMaterialCertificate", "productInformationSheet"]  # default first
 ALLOWED_ISSUERS = ["referenceMaterialProducer", "customer", "owner", "other"]
 
+INIT_IDENT = {"issuer": "referenceMaterialProducer", "value": "", "idName": ""}
+DEFAULT_PRODUCER = {
+    "producerName": "",
+    "producerStreet": "",
+    "producerStreetNo": "",
+    "producerPostCode": "",
+    "producerCity": "",
+    "producerCountryCode": "",
+    "producerPhone": "",
+    "producerFax": "",
+    "producerEmail": ""
+}
+DEFAULT_PERSON = {
+    "personName": "",
+    "description": "",
+    "role": "",
+    "mainSigner": False,
+    "cryptElectronicSeal": False,
+    "cryptElectronicSignature": False,
+    "cryptElectronicTimeStamp": False,
+}
+OFFICIAL_STMPL = {
+    k: {"name": "", "content": ""} for k in [
+        "intendedUse", "commutability", "storageInformation",
+        "instructionsForHandlingAndUse", "metrologicalTraceability",
+        "healthAndSafetyInformation", "subcontractors", "legalNotice",
+        "referenceToCertificationReport",
+    ]
+}
 
+# -----------------------------------------------------------------------------
+# Misc helpers
 
-# ------------------------------
-# QUDT Ontology Loading (cached)
-# ------------------------------
+def clean_text(txt: str) -> str:
+    return re.sub(r"\s+", " ", txt or "").strip()
+
+def xs_duration_hint() -> str:
+    return "Enter a valid xs:duration – e.g. P1Y6M means 1 year 6 months"
+
+# Data‑editor wrapper
+
+def data_editor_df(df: pd.DataFrame, key: str, **kwargs) -> pd.DataFrame:
+    try:
+        updated = st.data_editor(df, key=key, **kwargs)
+    except TypeError:
+        updated = st.data_editor(df, key=key)
+    if key in st.session_state and hasattr(st.session_state[key], "edited_rows"):
+        for row_idx, changes in st.session_state[key].edited_rows.items():
+            for col, new_val in changes.items():
+                updated.at[int(row_idx), col] = new_val
+    return updated
+
+# QUDT cache (Properties tab later)
 @st.cache_data
-def load_qudt_quantities_and_units():
-    g = Graph()
-    g.parse("qudt.ttl", format="turtle")  # Ensure qudt.ttl is available
-    qudt = Namespace("http://qudt.org/schema/qudt/")
-    # For simplicity, we extract applicable units per quantity kind.
-    quantity_kinds = {}
-    for s in g.subjects(None, qudt.QuantityKind):
-        quantity_name = str(s).split("/")[-1]
-        applicable_units = [str(unit).split("/")[-1] for unit in g.objects(s, qudt.applicableUnit)]
-        quantity_kinds[quantity_name] = applicable_units if applicable_units else ["Custom"]
-    return quantity_kinds
+def load_qudt():
+    g = Graph(); g.parse("qudt.ttl", format="turtle")
+    Q = Namespace("http://qudt.org/schema/qudt/")
+    res = {}
+    for s in g.subjects(None, Q.QuantityKind):
+        qn = s.split("/")[-1]
+        res[qn] = [u.split("/")[-1] for u in g.objects(s, Q.applicableUnit)] or ["Custom"]
+    return res
+qudt_quantities = load_qudt()
 
-qudt_quantities = load_qudt_quantities_and_units()
-
-# ------------------------------
-# Helper Functions for Material Properties
-# ------------------------------
+# Factories used later (Properties tab)
 
 def create_empty_materialProperties():
     return {
@@ -114,7 +117,7 @@ def create_empty_materialProperties():
         "description": "",
         "procedures": "",
         "isCertified": False,
-        "results": []  # Each result is a dictionary
+        "results": [],
     }
 
 def create_empty_result():
@@ -123,545 +126,173 @@ def create_empty_result():
         "description": "",
         "quantities": pd.DataFrame(columns=[
             "Name", "Label", "Value", "Quantity Type", "Unit",
-            "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution"
-        ])
+            "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution",
+        ]),
     }
-# ------------------------------
-# Session State Initialization for Material Properties
-# ------------------------------
-# ------------------------------
-# Session State Initialization for Material Properties
-# ------------------------------
-if "materialProperties" not in st.session_state:
-    st.session_state.materialProperties = []  # List for materialProperties entries.
-if "selected_quantity" not in st.session_state:
-    st.session_state.selected_quantity = ""
-if "selected_unit" not in st.session_state:
-    st.session_state.selected_unit = ""
-if "coverage_factor" not in st.session_state:
-    st.session_state.coverage_factor = 2.0
-if "coverage_probability" not in st.session_state:
-    st.session_state.coverage_probability = 0.95
-if "distribution" not in st.session_state:
-    st.session_state.distribution = "normal"
 
-# ------------------------------
-# Session State Initialization
-# ------------------------------
-if "materials_df" not in st.session_state:
-    st.session_state.materials_df = pd.DataFrame(columns=["Material Name", "Description", "Minimum Sample Size", "Unit"])
-if "materials" not in st.session_state:
-    # For our new form-based material entry, we store a list of dicts.
-    st.session_state.materials = []
-if "mp_tables" not in st.session_state:
-    st.session_state.mp_tables = []  # Each material properties table.
-if "identifications" not in st.session_state:
-    st.session_state.identifications = [{"issuer": "referenceMaterialProducer", "value": "", "idName": ""}]
-    # st.session_state.identifications = []
+# -----------------------------------------------------------------------------
+# XML → session‑state loader (minimal – Admin + Materials fields)
 
-if "responsible_persons" not in st.session_state:
-    st.session_state.responsible_persons = [{
-        "personName": "",
-        "description": "",
-        "role": "",
-        "mainSigner": False,
-        "cryptElectronicSeal": False,
-        "cryptElectronicSignature": False,
-        "cryptElectronicTimeStamp": False
-    }]
+def load_xml_into_state(xml_bytes: bytes):
+    try:
+        tree = ET.parse(io.BytesIO(xml_bytes))
+        root = tree.getroot()
+        ns = {"drmd": root.tag.strip("}").split("{")[0]}  # crude default‑ns
 
-if "producers" not in st.session_state:
-    st.session_state.producers = [{"producerName": "", "producerStreet": "", "producerStreetNo": "",
-                                     "producerPostCode": "", "producerCity": "", "producerCountryCode": "",
-                                     "producerPhone": "", "producerFax": "", "producerEmail": ""}]
+        # Title
+        title_node = root.find(".//drmd:title", ns)
+        if title_node is not None:
+            st.session_state.title_option = title_node.text
 
-if "official_statements" not in st.session_state:
-    # Each official statement is stored as a dict with optional 'name' and required 'content'
-    st.session_state.official_statements = {
-        "intendedUse": {"name": "", "content": ""},
-        "commutability": {"name": "", "content": ""},
-        "storageInformation": {"name": "", "content": ""},
-        "instructionsForHandlingAndUse": {"name": "", "content": ""},
-        "metrologicalTraceability": {"name": "", "content": ""},
-        "healthAndSafetyInformation": {"name": "", "content": ""},
-        "subcontractors": {"name": "", "content": ""},
-        "legalNotice": {"name": "", "content": ""},
-        "referenceToCertificationReport": {"name": "", "content": ""}
-    }
-if "custom_statements" not in st.session_state:
-    # Custom statements will always be exported as <drmd:statement> elements.
-    # We store each as a dict with keys "name" (the label) and "content" (the text).
-    st.session_state.custom_statements = []
+        # Persistent ID
+        pid_node = root.find(".//drmd:persistentIdentifier", ns)
+        if pid_node is not None:
+            st.session_state.persistent_id = pid_node.text
 
-if "title_option" not in st.session_state:
-    st.session_state.title_option = ALLOWED_TITLES[0]
-if "unique_id" not in st.session_state:
-    st.session_state.unique_id = ""
-if "validity_type" not in st.session_state:
-    st.session_state.validity_type = "Until Revoked"
-if "raw_validity_period" not in st.session_state:
-    st.session_state.raw_validity_period = ""
-if "date_of_issue" not in st.session_state:
-    st.session_state.date_of_issue = date.today()
-if "specific_time" not in st.session_state:
-    st.session_state.specific_time = date.today()
-if "template_loaded" not in st.session_state:
-    st.session_state.template_loaded = False
+        # Identifications (clear & reload)
+        st.session_state.identifications = []
+        for ident in root.findall(".//drmd:identification", ns):
+            st.session_state.identifications.append({
+                "issuer": ident.get("issuer", "referenceMaterialProducer"),
+                "idName": ident.findtext("drmd:idName", default="", namespaces=ns),
+                "value": ident.findtext("drmd:value", default="", namespaces=ns),
+            })
+        if not st.session_state.identifications:
+            st.session_state.identifications = [INIT_IDENT.copy()]
 
+        # Materials
+        st.session_state.materials = []
+        for mat in root.findall(".//drmd:material", ns):
+            m = {"uuid": str(uuid.uuid4()),
+                 "name": mat.findtext("drmd:name", default="", namespaces=ns),
+                 "description": mat.findtext("drmd:description", default="", namespaces=ns),
+                 "materialClass": mat.findtext("drmd:materialClass", default="", namespaces=ns),
+                 "minimumSampleSize": mat.findtext("drmd:minimumSampleSize", default="", namespaces=ns),
+                 "itemQuantities": mat.findtext("drmd:itemQuantities", default="", namespaces=ns),
+                 "isCertified": mat.get("isCertified", "false") == "true",
+                 "identifications": []}
+            for mid in mat.findall("drmd:identification", ns):
+                m["identifications"].append({
+                    "issuer": mid.get("issuer", "referenceMaterialProducer"),
+                    "idName": mid.findtext("drmd:idName", default="", namespaces=ns),
+                    "value": mid.findtext("drmd:value", default="", namespaces=ns),
+                })
+            if not m["identifications"]:
+                m["identifications"].append(INIT_IDENT.copy())
+            st.session_state.materials.append(m)
+        if not st.session_state.materials:
+            st.session_state.materials = [{"uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
+                                           "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
+                                           "identifications": [INIT_IDENT.copy()]}]
+        st.session_state.template_loaded = True
+        st.sidebar.success("XML template loaded ✔")
+    except Exception as e:
+        st.sidebar.error(f"Failed to load template: {e}")
 
+# -----------------------------------------------------------------------------
+# Robust session‑state initialisation (covers all tabs)
+SESSION_DEFAULTS = {
+    "identifications": [INIT_IDENT.copy()],
+    "materials": [{"uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
+                    "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
+                    "identifications": [INIT_IDENT.copy()]}],
+    "materialProperties": [],
+    "producers": [DEFAULT_PRODUCER.copy()],
+    "responsible_persons": [DEFAULT_PERSON.copy()],
+    "official_statements": OFFICIAL_STMPL.copy(),
+    "custom_statements": [],
+    "materials_df": pd.DataFrame(columns=["Material Name", "Description", "Minimum Sample Size", "Unit"]),
+    "mp_tables": [],
+    "selected_quantity": "", "selected_unit": "", "coverage_factor": 2.0,
+    "coverage_probability": 0.95, "distribution": "normal",
+    "title_option": "referenceMaterialCertificate",  # default
+    "persistent_id": "",
+    "validity_type": "Until Revoked", "raw_validity_period": "",
+    "date_of_issue": date.today(), "specific_time": date.today(),
+    "template_loaded": False,
+}
+for k, v in SESSION_DEFAULTS.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ------------------------------
-# Sidebar: Load XML Template for Editing
-# ------------------------------
+# -----------------------------------------------------------------------------
+# Sidebar utilities
 st.sidebar.header("Load XML Template")
-xml_template = st.sidebar.file_uploader("Load XML Template", type=["xml"])
+xml_template = st.sidebar.file_uploader("Load XML", type=["xml"])
+if xml_template and not st.session_state.template_loaded:
+    load_xml_into_state(xml_template.getvalue())
 
-if st.sidebar.button("Reset App and All Fields", key="reset"):
-    # Clear all keys from session_state.
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
+if st.sidebar.button("Reset All"):
+    st.session_state.clear(); st.rerun()
 
-
-
-# ------------------------------
-# Load XML Template (modified to load materials with all keys)
-
-def export_statements(ns_drmd, ns_dcc):
-    # Create the root <drmd:statements> element.
-    statements_elem = ET.Element(f"{{{ns_drmd}}}statements")
-    
-    def add_statement(element_name, label, text):
-        if text.strip():
-            stmt = ET.SubElement(statements_elem, f"{{{ns_drmd}}}{element_name}")
-            # Only add the dcc:name element if a label is provided.
-            if label.strip():
-                name_elem = ET.SubElement(stmt, f"{{{ns_dcc}}}name")
-                ET.SubElement(name_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = label.strip()
-            # Add the content (for simplicity, as a single node)
-            ET.SubElement(stmt, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = text.strip()
-    
-    official = st.session_state.official_statements
-    # For each official statement, use its element name.
-    add_statement("intendedUse", "Intended Use", official.get("intendedUse", {}).get("content", ""))
-    add_statement("commutability", "Commutability", official.get("commutability", {}).get("content", ""))
-    add_statement("storageInformation", "Storage Information", official.get("storageInformation", {}).get("content", ""))
-    add_statement("instructionsForHandlingAndUse", "Handling Instructions", official.get("instructionsForHandlingAndUse", {}).get("content", ""))
-    add_statement("metrologicalTraceability", "Metrological Traceability", official.get("metrologicalTraceability", {}).get("content", ""))
-    add_statement("healthAndSafetyInformation", "Health and Safety Information", official.get("healthAndSafetyInformation", {}).get("content", ""))
-    add_statement("subcontractors", "Subcontractors", official.get("subcontractors", {}).get("content", ""))
-    add_statement("legalNotice", "Legal Notice", official.get("legalNotice", {}).get("content", ""))
-    add_statement("referenceToCertificationReport", "Reference to Certification Report", official.get("referenceToCertificationReport", {}).get("content", ""))
-    
-    # Custom statements: always export as <drmd:statement>
-    for cs in st.session_state.custom_statements:
-        if cs.get("content", "").strip():
-            cs_elem = ET.SubElement(statements_elem, f"{{{ns_drmd}}}statement")
-            if cs.get("name", "").strip():
-                name_elem = ET.SubElement(cs_elem, f"{{{ns_dcc}}}name")
-                ET.SubElement(name_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = cs.get("name", "").strip()
-            ET.SubElement(cs_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = cs.get("content", "").strip()
-    
-    return statements_elem
-
-
-# ------------------------------
-def load_template_once(xml_content):
-    if xml_content and not st.session_state.template_loaded:
-        try:
-            tree = ET.parse(xml_content)
-            root = tree.getroot()
-            ns = {
-                "drmd": "https://example.org/drmd",
-                "dcc": "https://ptb.de/dcc",
-                "si": "https://ptb.de/si"
-            }
-            # Load title and unique identifier.
-            title_elem = root.find(".//drmd:titleOfTheDocument", ns)
-            if title_elem is not None and title_elem.text:
-                st.session_state.title_option = title_elem.text.strip() if title_elem.text.strip() in ALLOWED_TITLES else ALLOWED_TITLES[0]
-            uid_elem = root.find(".//drmd:uniqueIdentifier", ns)
-            if uid_elem is not None and uid_elem.text:
-                st.session_state.unique_id = uid_elem.text.strip()
-            # Load validity.
-            validity_elem = root.find(".//drmd:validity", ns)
-            if validity_elem is not None:
-                if validity_elem.find("drmd:untilRevoked", ns) is not None:
-                    st.session_state.validity_type = "Until Revoked"
-                elif validity_elem.find("drmd:timeAfterDispatch", ns) is not None:
-                    st.session_state.validity_type = "Time After Dispatch"
-                    period_elem = validity_elem.find("drmd:timeAfterDispatch/drmd:period", ns)
-                    if period_elem is not None and period_elem.text:
-                        st.session_state.raw_validity_period = period_elem.text.strip()
-                    dd_elem = validity_elem.find("drmd:timeAfterDispatch/drmd:dispatchDate", ns)
-                    if dd_elem is not None and dd_elem.text:
-                        st.session_state.date_of_issue = dd_elem.text.strip()
-                elif validity_elem.find("drmd:specificTime", ns) is not None:
-                    st.session_state.validity_type = "Specific Time"
-                    spec_elem = validity_elem.find("drmd:specificTime", ns)
-                    if spec_elem is not None and spec_elem.text:
-                        st.session_state.specific_time = spec_elem.text.strip()
-            # Load identifications.
-            idents = []
-            for ident_elem in root.findall(".//drmd:identifications/drmd:identification", ns):
-                issuer = ident_elem.find("drmd:issuer", ns)
-                value = ident_elem.find("drmd:value", ns)
-                name_elem = ident_elem.find("drmd:name/dcc:content", ns)
-                idents.append({
-                    "issuer": issuer.text.strip() if issuer is not None and issuer.text else "",
-                    "value": value.text.strip() if value is not None and value.text else "",
-                    "idName": " ".join(name_elem.text.split()) if name_elem is not None and name_elem.text else ""
-                })
-            if idents:
-                st.session_state.identifications = idents
-            # Load Producers.
-            prods = []
-            for prod_elem in root.findall(".//drmd:referenceMaterialProducer", ns):
-                name_elem = prod_elem.find("drmd:name/dcc:content", ns)
-                contact_elem = prod_elem.find("drmd:contact", ns)
-                street = streetNo = postCode = city = country = phone = fax = email = ""
-                if contact_elem is not None:
-                    contact_name = contact_elem.find("dcc:name", ns)
-                    loc = contact_elem.find("dcc:location", ns)
-                    if loc is not None:
-                        street = loc.find("dcc:street", ns).text.strip() if loc.find("dcc:street", ns) is not None and loc.find("dcc:street", ns).text else ""
-                        streetNo = loc.find("dcc:streetNo", ns).text.strip() if loc.find("dcc:streetNo", ns) is not None and loc.find("dcc:streetNo", ns).text else ""
-                        postCode = loc.find("dcc:postCode", ns).text.strip() if loc.find("dcc:postCode", ns) is not None and loc.find("dcc:postCode", ns).text else ""
-                        city = loc.find("dcc:city", ns).text.strip() if loc.find("dcc:city", ns) is not None and loc.find("dcc:city", ns).text else ""
-                        country = loc.find("dcc:countryCode", ns).text.strip() if loc.find("dcc:countryCode", ns) is not None and loc.find("dcc:countryCode", ns).text else ""
-                    phone = contact_elem.find("dcc:phone", ns).text.strip() if contact_elem.find("dcc:phone", ns) is not None and contact_elem.find("dcc:phone", ns).text else ""
-                    fax = contact_elem.find("dcc:fax", ns).text.strip() if contact_elem.find("dcc:fax", ns) is not None and contact_elem.find("dcc:fax", ns).text else ""
-                    email = contact_elem.find("dcc:eMail", ns).text.strip() if contact_elem.find("dcc:eMail", ns) is not None and contact_elem.find("dcc:eMail", ns).text else ""
-                prods.append({
-                    "producerName": name_elem.text.strip() if name_elem is not None and name_elem.text else "",
-                    "producerStreet": street,
-                    "producerStreetNo": streetNo,
-                    "producerPostCode": postCode,
-                    "producerCity": city,
-                    "producerCountryCode": country,
-                    "producerPhone": phone,
-                    "producerFax": fax,
-                    "producerEmail": email
-                })
-            if prods:
-                st.session_state.producers = prods
-            # Load Responsible Persons (including additional fields).
-            rps = []
-            for rp_elem in root.findall(".//drmd:respPersons/dcc:respPerson", ns):
-                person_elem = rp_elem.find("dcc:person/dcc:name/dcc:content", ns)
-                name = person_elem.text.strip() if person_elem is not None and person_elem.text else ""
-                desc_elems = rp_elem.findall("dcc:description/dcc:content", ns)
-                description = " ".join([d.text.strip() for d in desc_elems if d is not None and d.text]) if desc_elems else ""
-                role_elem = rp_elem.find("dcc:role", ns)
-                role = role_elem.text.strip() if role_elem is not None and role_elem.text else ""
-                mainSigner_elem = rp_elem.find("dcc:mainSigner", ns)
-                mainSigner = (mainSigner_elem.text.strip().lower() == "true") if mainSigner_elem is not None and mainSigner_elem.text else False
-                cryptElectronicSeal_elem = rp_elem.find("dcc:cryptElectronicSeal", ns)
-                cryptElectronicSeal = (cryptElectronicSeal_elem.text.strip().lower() == "true") if cryptElectronicSeal_elem is not None and cryptElectronicSeal_elem.text else False
-                cryptElectronicSignature_elem = rp_elem.find("dcc:cryptElectronicSignature", ns)
-                cryptElectronicSignature = (cryptElectronicSignature_elem.text.strip().lower() == "true") if cryptElectronicSignature_elem is not None and cryptElectronicSignature_elem.text else False
-                cryptElectronicTimeStamp_elem = rp_elem.find("dcc:cryptElectronicTimeStamp", ns)
-                cryptElectronicTimeStamp = (cryptElectronicTimeStamp_elem.text.strip().lower() == "true") if cryptElectronicTimeStamp_elem is not None and cryptElectronicTimeStamp_elem.text else False
-                rps.append({
-                    "personName": name,
-                    "description": description,
-                    "role": role,
-                    "mainSigner": mainSigner,
-                    "cryptElectronicSeal": cryptElectronicSeal,
-                    "cryptElectronicSignature": cryptElectronicSignature,
-                    "cryptElectronicTimeStamp": cryptElectronicTimeStamp
-                })
-            if rps:
-                st.session_state.responsible_persons = rps
-            # Load Materials.
-            mats = []
-            for mat_elem in root.findall(".//drmd:materials/drmd:material", ns):
-                name_elem = mat_elem.find("drmd:name/dcc:content", ns)
-                desc_elem = mat_elem.find("drmd:description/dcc:content", ns)
-                sample_elem = mat_elem.find("drmd:minimumSampleSize/dcc:itemQuantity/si:realListXMLList/si:valueXMLList", ns)
-                # Build material dictionary with all required keys.
-                mats.append({
-                    "name": name_elem.text.strip() if name_elem is not None and name_elem.text else "",
-                    "description": " ".join(desc_elem.text.split()) if desc_elem is not None and desc_elem.text else "",
-                    "materialClass": "",
-                    "minimumSampleSize": sample_elem.text.strip() if sample_elem is not None and sample_elem.text else "",
-                    "itemQuantities": "",
-                    "identification": {"issuer": "referenceMaterialProducer", "value": "", "idName": ""},
-                    "isCertified": False
-                })
-
-            if mats:
-                for mat in mats:  # where 'mats' is your list of material dictionaries
-                    if "uuid" not in mat:
-                        mat["uuid"] = str(uuid.uuid4())
-                st.session_state.materials_df = pd.DataFrame(mats)
-                st.session_state.materials = mats
-
-            # --- Load Statements ---
-            official_keys = ["intendedUse", "commutability", "storageInformation", 
-                            "instructionsForHandlingAndUse", "metrologicalTraceability",
-                            "healthAndSafetyInformation", "subcontractors", 
-                            "legalNotice", "referenceToCertificationReport"]
-            official_statements = { key: {"name": "", "content": ""} for key in official_keys }
-            custom_statements = []
-            
-            statements_elem = root.find(".//drmd:statements", ns)
-            if statements_elem is not None:
-                for child in statements_elem:
-                    # Get the local tag name
-                    tag = child.tag.split("}")[1]
-                    # Extract the optional name.
-                    name_elem = child.find("dcc:name/dcc:content", ns)
-                    name_text = clean_text(name_elem.text) if name_elem is not None and name_elem.text else ""
-                    # Extract all direct dcc:content children (excluding the one inside dcc:name).
-                    contents = []
-                    for elem in child.findall("dcc:content", ns):
-                        if elem.text:
-                            contents.append(clean_text(elem.text))
-                    content_text = "\n".join(contents)
-                    
-                    if tag in official_keys:
-                        official_statements[tag] = {"name": name_text, "content": content_text}
-                    elif tag == "statement":
-                        custom_statements.append({"name": name_text, "content": content_text})
-            
-            st.session_state.official_statements = official_statements
-            st.session_state.custom_statements = custom_statements
-            # --- Load Material Properties ---
-            mps = []
-            mp_list_elem = root.find("drmd:materialPropertiesList", ns)
-            if mp_list_elem is not None:
-                for mp_elem in mp_list_elem.findall("drmd:materialProperties", ns):
-                    mp_dict = {}
-                    # isCertified attribute.
-                    mp_dict["isCertified"] = True if mp_elem.attrib.get("isCertified", "false").lower() == "true" else False
-                    # Optional attribute id.
-                    mp_dict["id"] = mp_elem.attrib.get("id", "").strip()
-                    # Name (required)
-                    name_elem = mp_elem.find("drmd:name/dcc:content", ns)
-                    mp_dict["name"] = clean_text(name_elem.text) if name_elem is not None else ""
-                    # Description (optional)
-                    desc_elem = mp_elem.find("drmd:description/dcc:content", ns)
-                    mp_dict["description"] = clean_text(desc_elem.text) if desc_elem is not None else ""
-                    # Procedures (optional)
-                    proc_elem = mp_elem.find("drmd:procedures/dcc:content", ns)
-                    mp_dict["procedures"] = clean_text(proc_elem.text) if proc_elem is not None else ""
-                    
-                    # Results (required)
-                    results = []
-                    results_elem = mp_elem.find("drmd:results", ns)
-                    if results_elem is not None:
-                        for res_elem in results_elem.findall("dcc:result", ns):
-                            res_dict = {}
-                            res_name_elem = res_elem.find("dcc:name/dcc:content", ns)
-                            res_dict["result_name"] = clean_text(res_name_elem.text) if res_name_elem is not None else ""
-                            res_desc_elem = res_elem.find("dcc:description/dcc:content", ns)
-                            res_dict["description"] = clean_text(res_desc_elem.text) if res_desc_elem is not None else ""
-                            # Quantities
-                            quantities = []
-                            data_elem = res_elem.find("dcc:data", ns)
-                            if data_elem is not None:
-                                list_elem = data_elem.find("dcc:list", ns)
-                                if list_elem is not None:
-                                    for quant_elem in list_elem.findall("dcc:quantity", ns):
-                                        quant = {}
-                                        # Get quantity name.
-                                        qname_elem = quant_elem.find("dcc:name/dcc:content", ns)
-                                        quant["Name"] = clean_text(qname_elem.text) if qname_elem is not None else ""
-                                        # We'll leave Label and Quantity Type as empty for now.
-                                        quant["Label"] = ""
-                                        quant["Quantity Type"] = ""
-                                        # Get real value.
-                                        real_elem = quant_elem.find("si:real", ns)
-                                        if real_elem is not None:
-                                            value_elem = real_elem.find("si:value", ns)
-                                            quant["Value"] = float(value_elem.text.strip()) if value_elem is not None and value_elem.text else None
-                                            unit_elem = real_elem.find("si:unit", ns)
-                                            quant["Unit"] = unit_elem.text.strip() if unit_elem is not None and unit_elem.text else ""
-                                            # Measurement uncertainty.
-                                            mu_elem = real_elem.find("si:measurementUncertaintyUnivariate/si:expandedMU", ns)
-                                            if mu_elem is not None:
-                                                val_mu = mu_elem.find("si:valueExpandedMU", ns)
-                                                quant["Uncertainty"] = float(val_mu.text.strip()) if val_mu is not None and val_mu.text else None
-                                                cf_elem = mu_elem.find("si:coverageFactor", ns)
-                                                quant["Coverage Factor"] = float(cf_elem.text.strip()) if cf_elem is not None and cf_elem.text else None
-                                                cp_elem = mu_elem.find("si:coverageProbability", ns)
-                                                quant["Coverage Probability"] = float(cp_elem.text.strip()) if cp_elem is not None and cp_elem.text else None
-                                                dist_elem = mu_elem.find("si:distribution", ns)
-                                                quant["Distribution"] = dist_elem.text.strip() if dist_elem is not None and dist_elem.text else ""
-                                        quantities.append(quant)
-                            # Convert list of quantities to a DataFrame.
-                            df_quant = pd.DataFrame(quantities, columns=["Name", "Label", "Value", "Quantity Type", "Unit", "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution"])
-                            res_dict["quantities"] = df_quant
-                            results.append(res_dict)
-                    mp_dict["results"] = results
-                    # Assign a new UUID for internal use.
-                    mp_dict["uuid"] = str(uuid.uuid4())
-                    mps.append(mp_dict)
-            if mps:
-                st.session_state.materialProperties = mps
-            # --- End Load Material Properties ---
-            
-
-            # Extract all <comment> elements separately
-            comments = []
-            for comment_elem in root.findall(".//drmd:comment", ns):
-                if comment_elem.text:
-                    comments.append(comment_elem.text.strip())
-
-            # Extract all <document> elements with metadata
-            embedded_files = []
-            for doc_elem in root.findall(".//drmd:document", ns):
-                file_name = doc_elem.find("dcc:fileName", ns).text if doc_elem.find("dcc:fileName", ns) is not None else "unknown"
-                mime_type = doc_elem.find("dcc:mimeType", ns).text if doc_elem.find("dcc:mimeType", ns) is not None else "application/octet-stream"
-                base64_data = doc_elem.find("dcc:dataBase64", ns).text if doc_elem.find("dcc:dataBase64", ns) is not None else ""
-
-                # Convert base64 data to bytes for download
-                file_bytes = base64.b64decode(base64_data) if base64_data else b""
-
-                embedded_files.append({
-                    "name": file_name,
-                    "mimeType": mime_type,
-                    "data": file_bytes  # Store file as bytes
-                })
-
-            # Store extracted data in session state
-            st.session_state.comments = comments
-            st.session_state.embedded_files = embedded_files  # Store extracted files
-
-            st.session_state.template_loaded = True
-
-        except Exception as e:
-            st.error(f"Error loading template: {e}")
-            st.error(traceback.format_exc())
-
-
-
-if xml_template is not None:
-    load_template_once(xml_template)
-
-
-# ------------------------------
-# Main Tabs
-# ------------------------------
+# -----------------------------------------------------------------------------
+# Main Tabs list
 tabs = st.tabs([
-    "Administrative Data",
-    "Materials Properties",
-    "Statements",
-    "Comments & Documents",
-    "Digital Signature",
-    "Validate & Export"
+    "Administrative Data", "Materials", "Properties", "Statements",
+    "Comments & Documents", "Digital Signature", "Validate & Export",
 ])
 
-# ------------------------------
-# Tab 1: Administrative Data (Compact Layout)
-# ------------------------------
+# -----------------------------------------------------------------------------
+# TAB 0 – Administrative Data (unchanged from rev2 except duration help)
+# -----------------------------------------------------------------------------
 with tabs[0]:
-    st.header("Administrative Data")
-
-    # Basic Information Expander.
     with st.expander("Basic Information", expanded=True):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns([3, 3, 1])
         with col1:
-            st.selectbox("Title of Document", options=ALLOWED_TITLES, key="title_option")
-            st.text_input("Unique Identifier", key="unique_id")
+            st.selectbox(
+                "Title of the Document",
+                ALLOWED_TITLES,
+                key="title_option",
+                format_func=lambda x: " ".join(re.findall(r"[A-Z][^A-Z]*", x)).title(),
+            )
         with col2:
-            validity_choice = st.selectbox("Validity Type", options=["Until Revoked", "Time After Dispatch", "Specific Time"], key="validity_type")
-            if validity_choice == "Time After Dispatch":
-                st.text_input("Period (e.g. P2Y6M)", key="raw_validity_period", placeholder="P2Y6M")
-                st.date_input("Dispatch Date", key="date_of_issue")
-            elif validity_choice == "Specific Time":
-                st.date_input("Specific Time", key="specific_time")
+            st.text_input(
+                "Persistent Document Identifier",
+                key="persistent_id",
+                help="A globally unique, permanent identifier (e.g. UUID).",
+            )
+        with col3:
+            st.markdown("<div style='height:1.8rem'></div>", unsafe_allow_html=True)
+            if st.button("Generate", key="pid_gen"):
+                st.session_state.persistent_id = str(uuid.uuid4()); st.rerun()
 
-        st.markdown("#### Identifications")
-        # If there are no identifications, add a single empty identification for user entry.
-        # if not st.session_state.identifications:
-        #     st.session_state.identifications.append({"issuer": "referenceMaterialProducer", "value": "", "idName": ""})
-
+        st.markdown("---")
+        # RM Unique Identifiers block (same as rev2)
+        st.markdown("#### RM Unique Identifier(s)")
         for idx, ident in enumerate(st.session_state.identifications):
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                # Use .get() so if key is missing, default is provided.
-                ident["issuer"] = st.selectbox("Issuer", options=ALLOWED_ISSUERS, key=f"ident_issuer_{idx}",
-                                            index=ALLOWED_ISSUERS.index(ident.get("issuer", "referenceMaterialProducer"))
-                                            if ident.get("issuer", "") in ALLOWED_ISSUERS else 0)
-            with col_b:
-                ident["value"] = st.text_input("Value", value=ident.get("value", ""), key=f"ident_value_{idx}")
-            with col_c:
-                ident["idName"] = st.text_input("ID Name", value=ident.get("idName", ""), key=f"ident_name_{idx}")
-
+            a, b, c, d = st.columns([2, 3, 3, 0.8])
+            with a:
+                ident["issuer"] = st.selectbox("Issuer", ALLOWED_ISSUERS,
+                                               index=ALLOWED_ISSUERS.index(ident.get("issuer", "referenceMaterialProducer")),
+                                               key=f"ident_issuer_{idx}")
+            with b:
+                ident["idName"] = st.text_input("RM Name", ident.get("idName", ""), key=f"ident_name_{idx}")
+            with c:
+                ident["value"] = st.text_input("RM Code", ident.get("value", ""), key=f"ident_value_{idx}")
+            with d:
+                if st.button("❌", key=f"del_ident_{idx}", disabled=len(st.session_state.identifications)==1):
+                    st.session_state.identifications.pop(idx); st.rerun()
         if st.button("Add Identification", key="add_ident"):
-            st.session_state.identifications.append({"issuer": ALLOWED_ISSUERS[0], "value": "", "idName": ""})
-            try:
-                st.rerun()
-            except AttributeError:
-                pass
+            st.session_state.identifications.append(INIT_IDENT.copy()); st.rerun()
 
+        st.markdown("---")
+        # Period of Validity row with new help text
+        cols = st.columns([3, 3, 3])
+        with cols[0]:
+            v_type = st.selectbox("Period of Validity", ["Until Revoked", "Time After Dispatch", "Specific Time"], key="validity_type")
+        if v_type == "Time After Dispatch":
+            with cols[1]:
+                st.text_input("xs:duration", key="raw_validity_period", placeholder="P1Y6M", help=xs_duration_hint())
+            with cols[2]:
+                st.date_input("Dispatch Date", key="date_of_issue")
+        elif v_type == "Specific Time":
+            with cols[1]:
+                st.date_input("Date", key="specific_time")
+            cols[2].markdown(" ")
+        else:
+            cols[1].markdown(" "); cols[2].markdown(" ")
 
-
-    with st.expander("Materials", expanded=True):
-        st.subheader("Materials Entry")
-        for i, material in enumerate(st.session_state.materials):
-            # Use the material's unique UUID in the form key.
-            with st.form(key=f"material_form_{material['uuid']}"):
-                st.markdown(f"**Material {i+1}**")
-                mat_name = st.text_input("Material Name", value=material.get("name", ""), key=f"material_name_{material['uuid']}")
-                mat_desc = st.text_area("Description", value=material.get("description", ""), key=f"material_desc_{material['uuid']}")
-                mat_class = st.text_input("Material Class", value=material.get("materialClass", ""), key=f"material_class_{material['uuid']}")
-                min_sample = st.text_input("Minimum Sample Size", value=material.get("minimumSampleSize", ""), key=f"material_min_sample_{material['uuid']}")
-                item_quant = st.text_input("Item Quantities", value=material.get("itemQuantities", ""), key=f"material_item_quant_{material['uuid']}")
-                st.markdown("#### Identification (required)")
-                col_a, col_b, col_c = st.columns(3)
-                with col_a:
-                    ident_issuer = st.selectbox("Issuer", options=ALLOWED_ISSUERS,
-                                                index=ALLOWED_ISSUERS.index(material.get("identification", {}).get("issuer", "referenceMaterialProducer"))
-                                                if material.get("identification", {}).get("issuer", "") in ALLOWED_ISSUERS else 0,
-                                                key=f"material_ident_issuer_{material['uuid']}")
-                with col_b:
-                    ident_value = st.text_input("Identification Value", value=material.get("identification", {}).get("value", ""), key=f"material_ident_value_{material['uuid']}")
-                with col_c:
-                    ident_idName = st.text_input("Identification Name", value=material.get("identification", {}).get("idName", ""), key=f"material_ident_idName_{material['uuid']}")
-                is_certified = st.checkbox("Certified", value=material.get("isCertified", False), key=f"mat_certified_{material['uuid']}")
-                submit_material = st.form_submit_button("Save Material")
-                if submit_material:
-                    st.session_state.materials[i] = {
-                        "uuid": material["uuid"],
-                        "name": mat_name,
-                        "description": mat_desc,
-                        "materialClass": mat_class,
-                        "minimumSampleSize": min_sample,
-                        "itemQuantities": item_quant,
-                        "identification": {
-                            "issuer": ident_issuer,
-                            "value": (ident_value.strip() or "N/A"),
-                            "idName": ident_idName
-                        },
-                        "isCertified": is_certified
-                    }
-                    st.success(f"Material {i+1} updated!")
-            if st.button(f"Remove Material {i+1}", key=f"remove_material_{material['uuid']}"):
-                st.session_state.materials.pop(i)
-                try:
-                    st.rerun()
-                except AttributeError:
-                    pass
-        if st.button("Add New Material", key="add_material"):
-            st.session_state.materials.append({
-                "uuid": str(uuid.uuid4()),
-                "name": "",
-                "description": "",
-                "materialClass": "",
-                "minimumSampleSize": "",
-                "itemQuantities": "",
-                "identification": {"issuer": "referenceMaterialProducer", "value": "", "idName": ""},
-                "isCertified": False
-            })
-            try:
-                st.rerun()
-            except AttributeError:
-                pass
-
-    # Reference Material Producer and Responsible Persons section remains unchanged.
+     # Reference Material Producer and Responsible Persons section remains unchanged.
     with st.expander("Reference Material Producer and Responsible Persons", expanded=True):
         st.subheader("Reference Material Producers")
         with st.container():
@@ -750,8 +381,56 @@ def export_administrative_identifications(ns_drmd, ns_dcc):
             name_elem = ET.SubElement(ident_elem, f"{{{ns_drmd}}}name")
             add_if_valid(name_elem, "content", ident.get("idName", ""), ns_dcc)
     return idents_elem
-# --- Tab 2: Materials Properties (Editable Material Properties Tables) ---
+# -----------------------------------------------------------------------------
+# TAB 1 – Materials (unchanged from rev2)
+# -----------------------------------------------------------------------------
 with tabs[1]:
+    # same content as rev2 for Materials
+    for i, mat in enumerate(st.session_state.materials):
+        with st.expander(f"Material {i+1}", expanded=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                mat["name"] = st.text_input("Material Name", mat["name"], key=f"mat_name_{mat['uuid']}")
+                mat["materialClass"] = st.text_input("Material Class", mat["materialClass"], key=f"mat_class_{mat['uuid']}")
+                mat["itemQuantities"] = st.text_input("Item Quantities", mat["itemQuantities"], key=f"mat_iq_{mat['uuid']}")
+            with c2:
+                mat["description"] = st.text_area("Description", mat["description"], key=f"mat_desc_{mat['uuid']}")
+                mat["minimumSampleSize"] = st.text_input("Minimum Sample Size", mat["minimumSampleSize"], key=f"mat_min_{mat['uuid']}")
+                mat["isCertified"] = st.checkbox("Certified", mat["isCertified"], key=f"mat_cert_{mat['uuid']}")
+
+            st.markdown("##### Identifications")
+            for j, ident in enumerate(mat["identifications"]):
+                ic1, ic2, ic3, ic4 = st.columns([2, 3, 3, 0.8])
+                with ic1:
+                    ident["issuer"] = st.selectbox("Issuer", ALLOWED_ISSUERS,
+                                                  index=ALLOWED_ISSUERS.index(ident.get("issuer", "referenceMaterialProducer")),
+                                                  key=f"mat_{mat['uuid']}_iss_{j}")
+                with ic2:
+                    ident["idName"] = st.text_input("RM Name", ident["idName"], key=f"mat_{mat['uuid']}_name_{j}")
+                with ic3:
+                    ident["value"] = st.text_input("RM Code", ident["value"], key=f"mat_{mat['uuid']}_code_{j}")
+                with ic4:
+                    if st.button("❌", key=f"mat_{mat['uuid']}_delident_{j}", disabled=len(mat["identifications"])==1):
+                        mat["identifications"].pop(j); st.rerun()
+            if st.button("Add Identification", key=f"mat_addident_{mat['uuid']}"):
+                mat["identifications"].append(INIT_IDENT.copy()); st.rerun()
+
+            if st.button("Remove Material", key=f"rm_mat_{mat['uuid']}", disabled=len(st.session_state.materials)==1):
+                st.session_state.materials.pop(i); st.rerun()
+
+    if st.button("➕ Add Material", key="add_material"):
+        st.session_state.materials.append({
+            "uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
+            "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
+            "identifications": [INIT_IDENT.copy()],
+        }); st.rerun()
+
+# -----------------------------------------------------------------------------
+# --- TAB 2 – Properties starts below (placeholder) ---
+# -----------------------------------------------------------------------------
+
+# --- Tab 2: Materials Properties (Editable Material Properties Tables) ---
+with tabs[2]:
 
     col_left, col_right = st.columns([3.5, 1])
 
@@ -1028,7 +707,7 @@ def export_materialProperties(ns_drmd, ns_dcc, ns_si):
     return mp_list_elem
 
 
-with tabs[2]:
+with tabs[3]:
     st.header("Statements")
     
     # Official Statements (using dcc:richContentType structure)
@@ -1106,7 +785,7 @@ def export_statements(ns_drmd, ns_dcc):
 import base64
 
 # --- Tab 4: Comments & Documents ---
-with tabs[3]:
+with tabs[4]:
     st.header("Comments and Attachments")
 
     # Single Comment (instead of multiple separate comment elements)
@@ -1186,11 +865,11 @@ def export_document(ns_drmd, ns_dcc):
     # return document_elements
 
 # --- Tab 5: Digital Signature ---
-with tabs[4]:
+with tabs[5]:
     st.header("Digital Signature")
     st.write("Under construction ...")
 
-with tabs[5]:
+with tabs[6]:
     st.header("Validate & Export")
     st.write("Click the button below to generate the complete XML from your entered data.")
     
