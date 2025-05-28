@@ -125,7 +125,7 @@ st.markdown(
     }}
 
     /* Selected option in dropdowns */
-    .stSelectbox div[data-testid="stSelectbox"] > div, 
+    .stSelectbox div[data-testid="stSelectbox"] > div,
     .stSelectbox > div > div {{
         font-size: {fs}rem !important;
     }}
@@ -632,29 +632,31 @@ with tabs[0]:
             if st.button("Generate", key="pid_gen", on_click=generate_uuid):
                 pass
 
-        # RM Unique Identifiers block (same as rev2)
+        # RM Unique Identifier block (single, non-changeable issuer)
         st.markdown("")
+        st.markdown("RM unique identifier:")
 
-        st.markdown("RM unique identifier(s):")
+        # Ensure we have exactly one identification with fixed issuer
+        if not st.session_state.identifications:
+            st.session_state.identifications = [INIT_IDENT.copy()]
+        elif len(st.session_state.identifications) > 1:
+            st.session_state.identifications = [st.session_state.identifications[0]]
 
-        for idx, ident in enumerate(st.session_state.identifications):
-            a, b, c, d = st.columns([2, 3, 3, 0.8])
-            with a:
-                
-                ident["issuer"] = st.selectbox("Issuer", ALLOWED_ISSUERS,
-                                               index=ALLOWED_ISSUERS.index(ident.get("issuer", "referenceMaterialProducer")),
-                                               key=f"ident_issuer_{idx}")
-            with b:
-                ident["idName"] = st.text_input("RM Name", ident.get("idName", ""), key=f"ident_name_{idx}")
-            with c:
-                ident["value"] = st.text_input("RM Code", ident.get("value", ""), key=f"ident_value_{idx}")
-            with d:
-                st.write("")
-                if st.button("❌", key=f"del_ident_{idx}", disabled=len(st.session_state.identifications)==1):
-                    st.session_state.identifications.pop(idx); st.rerun()
-        if st.button("Add Identification", key="add_ident"):
-            st.session_state.identifications.append(INIT_IDENT.copy()); st.rerun()
-        
+        # Force issuer to be referenceMaterialProducer
+        st.session_state.identifications[0]["issuer"] = "referenceMaterialProducer"
+
+        ident = st.session_state.identifications[0]
+        col1, col2, col3 = st.columns([2, 3, 3])
+        with col1:
+            # Disabled selector but keeps the same style
+            st.selectbox("Issuer", ALLOWED_ISSUERS,
+                        index=ALLOWED_ISSUERS.index("referenceMaterialProducer"),
+                        key="single_ident_issuer", disabled=True)
+        with col2:
+            ident["idName"] = st.text_input("RM Name", ident.get("idName", ""), key="single_ident_name")
+        with col3:
+            ident["value"] = st.text_input("RM Code", ident.get("value", ""), key="single_ident_value")
+
         st.markdown("")
 
         # Period of Validity row with new help text
@@ -792,22 +794,31 @@ with tabs[1]:
                 mat["minimumSampleSize"] = st.text_input("Minimum Sample Size", mat["minimumSampleSize"], key=f"mat_min_{mat['uuid']}")
                 mat["isCertified"] = st.checkbox("Certified", mat["isCertified"], key=f"mat_cert_{mat['uuid']}")
 
-            st.markdown("Identifications")
-            for j, ident in enumerate(mat["identifications"]):
-                ic1, ic2, ic3, ic4 = st.columns([2, 3, 3, 0.8])
-                with ic1:
-                    ident["issuer"] = st.selectbox("Issuer", ALLOWED_ISSUERS,
-                                                  index=ALLOWED_ISSUERS.index(ident.get("issuer", "referenceMaterialProducer")),
-                                                  key=f"mat_{mat['uuid']}_iss_{j}")
-                with ic2:
-                    ident["idName"] = st.text_input("RM Name", ident["idName"], key=f"mat_{mat['uuid']}_name_{j}")
-                with ic3:
-                    ident["value"] = st.text_input("RM Code", ident["value"], key=f"mat_{mat['uuid']}_code_{j}")
-                with ic4:
-                    if st.button("❌", key=f"mat_{mat['uuid']}_delident_{j}", disabled=len(mat["identifications"])==1):
-                        mat["identifications"].pop(j); st.rerun()
-            if st.button("Add Identification", key=f"mat_addident_{mat['uuid']}"):
-                mat["identifications"].append(INIT_IDENT.copy()); st.rerun()
+            st.markdown("Identification")
+            # Ensure material has exactly one identification that copies from administrative data
+            if not mat["identifications"]:
+                mat["identifications"] = [INIT_IDENT.copy()]
+            elif len(mat["identifications"]) > 1:
+                mat["identifications"] = [mat["identifications"][0]]
+
+            # Copy identification from administrative data
+            if st.session_state.identifications:
+                admin_ident = st.session_state.identifications[0]
+                mat["identifications"][0]["issuer"] = admin_ident["issuer"]
+                mat["identifications"][0]["idName"] = admin_ident["idName"]
+                mat["identifications"][0]["value"] = admin_ident["value"]
+
+            # Display as read-only with same style as administrative data
+            mat_ident = mat["identifications"][0]
+            col1, col2, col3 = st.columns([2, 3, 3])
+            with col1:
+                st.selectbox("Issuer", ALLOWED_ISSUERS,
+                           index=ALLOWED_ISSUERS.index("referenceMaterialProducer"),
+                           key=f"mat_{mat['uuid']}_issuer_readonly", disabled=True)
+            with col2:
+                st.text_input("RM Name", value=mat_ident.get("idName", ""), key=f"mat_{mat['uuid']}_name_readonly", disabled=True)
+            with col3:
+                st.text_input("RM Code", value=mat_ident.get("value", ""), key=f"mat_{mat['uuid']}_code_readonly", disabled=True)
 
             if st.button("Remove Material", key=f"rm_mat_{mat['uuid']}", disabled=len(st.session_state.materials)==1):
                 st.session_state.materials.pop(i); st.rerun()
@@ -826,7 +837,7 @@ with tabs[1]:
 # --- Tab 2: Materials Properties (Editable Material Properties Tables) ---
 with tabs[2]:
 
-    col_left, col_right = st.columns([5, 1])
+    col_left,  = st.columns([1])
 
     with col_left:
         # material_scroll = st.container(height=1000)
@@ -858,7 +869,7 @@ with tabs[2]:
 
                     # For each measurement result (non-nested forms)
                     for res_idx, result in enumerate(mp.get("results", [])):
-                        
+
                         col1, col2,  = st.columns([5, 2])
                         with col1:
                             st.markdown(f"Table {res_idx+1}")
@@ -873,36 +884,30 @@ with tabs[2]:
                             # Use data_editor for the quantities DataFrame.
                             result["quantities"] = st.data_editor(
                                 result.get("quantities", pd.DataFrame(columns=[
-                                    "Name", "Label", "Value", "Quantity Type", "Unit",
+                                    "Name", "Label", "Value", "Quantity Kind", "Unit",
                                     "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution"
                                 ])),
                                 num_rows="dynamic",
                                 key=f"quantities_{mp_uuid}_{res_idx}"
                             )
-                            # Button to add a new row with defaults.
 
-                            col1, col2,  = st.columns(2)
-                            with col1: 
-                                if st.form_submit_button("Add New Row and Apply Quantity and Unit"):
-                                    new_row = pd.DataFrame([{
-                                        "Quantity Type": st.session_state.get("selected_quantity", ""),
-                                        "Name": "",
-                                        "Label": "",
-                                        "Value": "",
-                                        "Unit": st.session_state.get("selected_unit", ""),
-                                        "Uncertainty": "",
-                                        "Coverage Factor": "",
-                                        "Coverage Probability": "",
-                                        "Distribution": ""
-                                    }])
-                                    result["quantities"] = pd.concat([result["quantities"], new_row], ignore_index=True)
-                                    st.rerun()
+                            # Default uncertainty controls in one line under the table
+                            st.markdown("**Default Uncertainty Values:**")
+                            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                            with col1:
+                                local_coverage_factor = st.number_input("Coverage Factor", min_value=1.0, max_value=10.0, value=2.0, step=0.1, key=f"local_cf_{mp_uuid}_{res_idx}")
                             with col2:
-                                # Button to apply default uncertainty values to all rows.
-                                if st.form_submit_button("Apply Uncertainty to All Rows"):
-                                    result["quantities"]["Coverage Factor"] = st.session_state.get("coverage_factor", 2.0)
-                                    result["quantities"]["Coverage Probability"] = st.session_state.get("coverage_probability", 0.95)
-                                    result["quantities"]["Distribution"] = st.session_state.get("distribution", "normal")
+                                local_coverage_probability = st.number_input("Probability", min_value=0.0, max_value=1.0, value=0.95, step=0.01, key=f"local_cp_{mp_uuid}_{res_idx}")
+                            with col3:
+                                local_distribution = st.selectbox("Distribution", ["normal", "log-normal", "uniform"], index=0, key=f"local_dist_{mp_uuid}_{res_idx}")
+                            with col4:
+                                # Button to apply default uncertainty values to all rows
+                                if st.form_submit_button("Apply to All Rows"):
+                                    # Apply the local values to all rows in the current table
+                                    if not result["quantities"].empty:
+                                        result["quantities"]["Coverage Factor"] = local_coverage_factor
+                                        result["quantities"]["Coverage Probability"] = local_coverage_probability
+                                        result["quantities"]["Distribution"] = local_distribution
                                     st.rerun()
 
 
@@ -923,24 +928,15 @@ with tabs[2]:
                 st.session_state.materialProperties.append(create_empty_materialProperties())
                 st.rerun()
 
-    with col_right:
+    # with col_right:
+    #     # Commented out quantity selection and QUDT selection
+    #     # st.markdown("Quantity Selection", help="This panel shows available quantity types and their units from the QUDT ontology. Select a quantity to see applicable units.",)
+    #     # st.session_state.selected_quantity = st.selectbox("Type", list(qudt_quantities.keys()) + ["Custom"], key="quantity_select")
+    #     # st.session_state.selected_unit = st.selectbox("Unit", qudt_quantities.get(st.session_state.selected_quantity, ["Custom"]), key="unit_select")
+    #     # st.markdown("---")
 
-        with st.container():
-            st.markdown("<div class='sticky-right'>", unsafe_allow_html=True)
-            # More compact sidebar
-            st.markdown("Quantity Selection", help="This panel shows available quantity types and their units from the QUDT ontology. Select a quantity to see applicable units.",)
-            st.session_state.selected_quantity = st.selectbox("Type", list(qudt_quantities.keys()) + ["Custom"], key="quantity_select")
-            st.session_state.selected_unit = st.selectbox("Unit", qudt_quantities.get(st.session_state.selected_quantity, ["Custom"]), key="unit_select")
-
-            st.markdown("---")
-            # Default uncertainty values with helper text
-            st.markdown("Default Uncertainty", help = "Set default uncertainty values to apply to all quantities in a properties set.")
-            coverage_factor = st.number_input("Coverage Factor", min_value=1.0, max_value=10.0, value=st.session_state.get("coverage_factor", 2.0), step=0.1, key="coverage_factor")
-            coverage_probability = st.number_input("Probability", min_value=0.0, max_value=1.0, value=st.session_state.get("coverage_probability", 0.95), step=0.01, key="coverage_probability")
-            distribution = st.selectbox("Distribution", ["normal", "log-normal", "uniform"], key="distribution")
-            # You can then use these local variables; no need to reassign into st.session_state.
-
-            st.markdown("</div>", unsafe_allow_html=True)
+    #     # Removed uncertainty fields from right column - now they are under each table
+    #     #st.write("Properties configuration panel")
 
 
 def add_if_valid(parent, tag, value, ns):
