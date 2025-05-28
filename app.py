@@ -1075,7 +1075,7 @@ def export_materialProperties(ns_drmd, ns_dcc, ns_si):
 with tabs[3]:
 
     # Official Statements (using dcc:richContentType structure)
-    with st.expander("Iso Statements", expanded=True):
+    with st.expander("ISO 17034 Statements", expanded=True):
 
         # Intended Use
         content_val = st.text_area("Intended Use", value=st.session_state.official_statements.get("intendedUse", {}).get("content", ""), key="official_content_intendedUse")
