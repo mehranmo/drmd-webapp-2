@@ -219,7 +219,7 @@ def create_empty_result():
         "result_name": "",
         "description": "",
         "quantities": pd.DataFrame(columns=[
-            "Name", "Label", "Value", "Quantity Type", "Unit",
+            "Name", "Label", "Value", "Quantity Kind", "Unit",
             "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution",
         ]),
     }
