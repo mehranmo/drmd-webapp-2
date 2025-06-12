@@ -40,3 +40,19 @@ The DRMD schema builds upon the existing DCC schema. You can find the DCC schema
 <?xml-stylesheet type="text/xsl" href="drmd.xsl"?>
 ```
 
+
+### Docker
+
+To build the Docker image:
+
+```bash
+docker build -t drmd-webapp .
+```
+
+To run the container:
+
+```bash
+docker run -p 8501:8501 drmd-webapp
+```
+=======
+
