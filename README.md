@@ -36,6 +36,9 @@ The DRMD schema builds upon the existing DCC schema. You can find the DCC schema
 ### XSLT Stylesheet
 
 *   `drmd.xsl`: This file is an XSLT stylesheet that can be used to transform DRMD XML documents into human-readable HTML format. To use this stylesheet, reference it in your XML document as follows:
+```xml
+<?xml-stylesheet type="text/xsl" href="drmd.xsl"?>
+```
 
 
 ### Docker
@@ -51,3 +54,5 @@ To run the container:
 ```bash
 docker run -p 8501:8501 drmd-webapp
 ```
+=======
+
