@@ -32,6 +32,7 @@ st.set_page_config(layout="wide")
 DEFAULT_XSD_PATH = "./drmd.xsd"
 DEFAULT_XSL_PATH = "./drmd.xsl"
 DS_NS = "http://www.w3.org/2000/09/xmldsig#"
+SCHEMA_VERSION = "0.2.0"
 ALLOWED_TITLES = ["referenceMaterialCertificate", "productInformationSheet"]  # default first
 ALLOWED_ISSUERS = ["referenceMaterialProducer", "customer", "owner", "other"]
 
@@ -578,6 +579,10 @@ for k, v in SESSION_DEFAULTS.items():
 # -----------------------------------------------------------------------------
 # Sidebar utilities
 st.sidebar.header("DRMD Generator")
+st.sidebar.markdown(
+    f"<span style='font-size:0.75rem'>Schema v{SCHEMA_VERSION}</span>",
+    unsafe_allow_html=True,
+)
 xml_template = st.sidebar.file_uploader("Load XML file", type=["xml"])
 if xml_template and not st.session_state.template_loaded:
     load_xml_into_state(xml_template.getvalue())
@@ -1284,7 +1289,7 @@ with tabs[6]:
         # Create the root element.
         root = ET.Element(
             f"{{{ns_drmd}}}digitalReferenceMaterialDocument",
-            attrib={"schemaVersion": "0.2.0"},
+            attrib={"schemaVersion": SCHEMA_VERSION},
         )
 
         # --- Build administrativeData ---
