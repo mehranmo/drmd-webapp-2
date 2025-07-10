@@ -1282,7 +1282,10 @@ with tabs[6]:
         ET.register_namespace("ds", DS_NS)
 
         # Create the root element.
-        root = ET.Element(f"{{{ns_drmd}}}digitalReferenceMaterialDocument", attrib={"schemaVersion": "0.1.1"})
+        root = ET.Element(
+            f"{{{ns_drmd}}}digitalReferenceMaterialDocument",
+            attrib={"schemaVersion": "0.2.0"},
+        )
 
         # --- Build administrativeData ---
         admin_data = ET.SubElement(root, f"{{{ns_drmd}}}administrativeData")
@@ -1311,48 +1314,6 @@ with tabs[6]:
         else:
             ET.SubElement(validity_elem, f"{{{ns_drmd}}}untilRevoked").text = "true"
 
-        # Materials: using the list from the Materials form.
-        materials_elem = ET.SubElement(admin_data, f"{{{ns_drmd}}}materials")
-        if not st.session_state.materials:
-            # If no material was entered, add a dummy material.
-            dummy = ET.SubElement(materials_elem, f"{{{ns_drmd}}}material")
-            dummy_name = ET.SubElement(dummy, f"{{{ns_drmd}}}name")
-            ET.SubElement(dummy_name, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = "Dummy Material"
-        else:
-            for material in st.session_state.materials:
-                mat_elem = ET.SubElement(materials_elem, f"{{{ns_drmd}}}material")
-                name_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}name")
-                ET.SubElement(name_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = material.get("name", "")
-                if (material.get("description", "") or "").strip():
-                    desc_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}description")
-                    ET.SubElement(desc_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = material.get("description", "")
-                # minimumSampleSize (required) – using a default value "0" if empty.
-                min_sample_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}minimumSampleSize")
-                iq_elem = ET.SubElement(min_sample_elem, f"{{{ns_dcc}}}itemQuantity")
-                realList_elem = ET.SubElement(iq_elem, f"{{{ns_si}}}realListXMLList")
-                val_elem = ET.Element(f"{{{ns_si}}}valueXMLList")
-                val_elem.text = (material.get("minimumSampleSize", "").strip() or "0")
-                unit_elem = ET.Element(f"{{{ns_si}}}unitXMLList")
-                unit_elem.text = ""
-                realList_elem.append(val_elem)
-                realList_elem.append(unit_elem)
-                # Optional: itemQuantities
-                if (material.get("itemQuantities", "") or "").strip():
-                    itemQuant_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}itemQuantities")
-                    dummy_item = ET.SubElement(itemQuant_elem, f"{{{ns_dcc}}}itemQuantity")
-                    dummy_rl = ET.SubElement(dummy_item, f"{{{ns_si}}}realListXMLList")
-                    ET.SubElement(dummy_rl, f"{{{ns_si}}}valueXMLList").text = material.get("itemQuantities", "")
-                    ET.SubElement(dummy_rl, f"{{{ns_si}}}unitXMLList").text = ""
-                # identifications (required)
-                ident_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}identifications")
-                ident = material.get("identification", {"issuer": "referenceMaterialProducer", "value": "", "idName": ""})
-                ident_value = (ident.get("value", "").strip() or "N/A")
-                ident_entry = ET.SubElement(ident_elem, f"{{{ns_drmd}}}identification")
-                ET.SubElement(ident_entry, f"{{{ns_drmd}}}issuer").text = ident.get("issuer", "referenceMaterialProducer")
-                ET.SubElement(ident_entry, f"{{{ns_drmd}}}value").text = ident_value
-                if (ident.get("idName", "") or "").strip():
-                    idname_elem = ET.SubElement(ident_entry, f"{{{ns_drmd}}}name")
-                    ET.SubElement(idname_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = ident.get("idName", "")
 
         # Reference Material Producer
         if not st.session_state.producers:
@@ -1416,14 +1377,59 @@ with tabs[6]:
                 if rp.get("cryptElectronicTimeStamp", False):
                     ET.SubElement(rp_elem, f"{{{ns_dcc}}}cryptElectronicTimeStamp").text = "true"
 
-        # Add the statements section.
-        statements_elem = export_statements(ns_drmd, ns_dcc)
-        admin_data.append(statements_elem)
+        # Materials: using the list from the Materials form.
+        materials_elem = ET.SubElement(root, f"{{{ns_drmd}}}materials")
+        if not st.session_state.materials:
+            # If no material was entered, add a dummy material.
+            dummy = ET.SubElement(materials_elem, f"{{{ns_drmd}}}material")
+            dummy_name = ET.SubElement(dummy, f"{{{ns_drmd}}}name")
+            ET.SubElement(dummy_name, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = "Dummy Material"
+        else:
+            for material in st.session_state.materials:
+                mat_elem = ET.SubElement(materials_elem, f"{{{ns_drmd}}}material")
+                name_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}name")
+                ET.SubElement(name_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = material.get("name", "")
+                if (material.get("description", "") or "").strip():
+                    desc_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}description")
+                    ET.SubElement(desc_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = material.get("description", "")
+                # minimumSampleSize (required) – using a default value "0" if empty.
+                min_sample_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}minimumSampleSize")
+                iq_elem = ET.SubElement(min_sample_elem, f"{{{ns_dcc}}}itemQuantity")
+                realList_elem = ET.SubElement(iq_elem, f"{{{ns_si}}}realListXMLList")
+                val_elem = ET.Element(f"{{{ns_si}}}valueXMLList")
+                val_elem.text = (material.get("minimumSampleSize", "").strip() or "0")
+                unit_elem = ET.Element(f"{{{ns_si}}}unitXMLList")
+                unit_elem.text = ""
+                realList_elem.append(val_elem)
+                realList_elem.append(unit_elem)
+                # Optional: itemQuantities
+                if (material.get("itemQuantities", "") or "").strip():
+                    itemQuant_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}itemQuantities")
+                    dummy_item = ET.SubElement(itemQuant_elem, f"{{{ns_dcc}}}itemQuantity")
+                    dummy_rl = ET.SubElement(dummy_item, f"{{{ns_si}}}realListXMLList")
+                    ET.SubElement(dummy_rl, f"{{{ns_si}}}valueXMLList").text = material.get("itemQuantities", "")
+                    ET.SubElement(dummy_rl, f"{{{ns_si}}}unitXMLList").text = ""
+                # identifications (required)
+                ident_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}identifications")
+                ident = material.get("identification", {"issuer": "referenceMaterialProducer", "value": "", "idName": ""})
+                ident_value = (ident.get("value", "").strip() or "N/A")
+                ident_entry = ET.SubElement(ident_elem, f"{{{ns_drmd}}}identification")
+                ET.SubElement(ident_entry, f"{{{ns_drmd}}}issuer").text = ident.get("issuer", "referenceMaterialProducer")
+                ET.SubElement(ident_entry, f"{{{ns_drmd}}}value").text = ident_value
+                if (ident.get("idName", "") or "").strip():
+                    idname_elem = ET.SubElement(ident_entry, f"{{{ns_drmd}}}name")
+                    ET.SubElement(idname_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = ident.get("idName", "")
 
-    # --- Material Properties ---
-         # Next: materialPropertiesList.
+        # Add material properties section next.
         mp_list_elem = export_materialProperties(ns_drmd, ns_dcc, ns_si)
         root.append(mp_list_elem)
+
+        # Add the statements section after the material properties.
+        statements_elem = export_statements(ns_drmd, ns_dcc)
+        root.append(statements_elem)
+
+    # --- Additional Elements ---
+
 
         # 3️ Add a single <comment> element, if provided.
         comment_elem = export_comment(ns_drmd)
