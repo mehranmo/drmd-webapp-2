@@ -5,10 +5,10 @@
     xmlns:dcc="https://ptb.de/dcc"
     xmlns:si="https://ptb.de/si"
     xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
-
+    
     <!-- Output as HTML -->
     <xsl:output method="html" indent="yes" />
-
+    
     <!-- Root template -->
     <xsl:template match="/">
       <html>
@@ -78,7 +78,7 @@
               </xsl:if>
             </xsl:if>
           </table>
-
+          
           <h3>Reference Material Producer</h3>
           <table>
             <tr>
@@ -91,7 +91,7 @@
               <th>Contact</th>
               <td>
                 <xsl:value-of select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:referenceMaterialProducer/drmd:contact/dcc:location/dcc:street" />
-                ,
+                , 
                 <xsl:value-of select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:referenceMaterialProducer/drmd:contact/dcc:location/dcc:streetNo" /><br/>
                 <xsl:value-of select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:referenceMaterialProducer/drmd:contact/dcc:location/dcc:postCode" />
                 <xsl:value-of select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:referenceMaterialProducer/drmd:contact/dcc:location/dcc:city" />
@@ -105,10 +105,10 @@
               </td>
             </tr>
           </table>
-
+          
           <h3>Materials</h3>
           <!-- Loop through each material (formerly "item") -->
-          <xsl:for-each select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:materials/drmd:material">
+          <xsl:for-each select="drmd:digitalReferenceMaterialDocument/drmd:materials/drmd:material">
             <table>
               <tr>
                 <th>Name</th>
@@ -138,10 +138,10 @@
               </tr>
             </table>
           </xsl:for-each>
-
+          
           <h3>Statements</h3>
           <!-- Process each statement -->
-          <xsl:for-each select="drmd:digitalReferenceMaterialDocument/drmd:administrativeData/drmd:statements/*">
+          <xsl:for-each select="drmd:digitalReferenceMaterialDocument/drmd:statements/*">
             <h4>
               <xsl:value-of select="dcc:name/dcc:content[@lang='en']" />
             </h4>
@@ -151,7 +151,7 @@
               </xsl:for-each>
             </p>
           </xsl:for-each>
-
+          
           <h3>Responsible Persons</h3>
           <table>
             <tr>
@@ -169,7 +169,7 @@
               </tr>
             </xsl:for-each>
           </table>
-
+          
           <div class="divider"></div>
           <!-- New section for Materials Properties (formerly measurementResults) -->
           <h2>Materials Properties</h2>
@@ -225,7 +225,7 @@
         </body>
       </html>
     </xsl:template>
-
+    
     <!-- Template for quantities (used in materials properties table) -->
     <xsl:template match="dcc:quantity">
       <tr>
@@ -243,7 +243,7 @@
         </td>
       </tr>
     </xsl:template>
-
+    
     <!-- If you need to process procedure elements (formerly method), add a template here -->
-
+    
 </xsl:stylesheet>
