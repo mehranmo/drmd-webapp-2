@@ -1,80 +1,89 @@
 <?xml version='1.0' encoding='UTF-8'?>
-<xs:schema version="0.1.1"
-		   xmlns:xs="http://www.w3.org/2001/XMLSchema"
+<xs:schema version="0.2.0"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
            xmlns:drmd="https://example.org/drmd"
            xmlns:dcc="https://ptb.de/dcc"
            xmlns:si="https://ptb.de/si"
            xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
            targetNamespace="https://example.org/drmd"
            elementFormDefault="qualified">
-	<xs:import namespace="https://ptb.de/dcc"
-	           schemaLocation="https://www.ptb.de/dcc/dcc.xsd"/>
-	<xs:import namespace="https://ptb.de/si"
-	           schemaLocation="https://ptb.de/si/v2.2.0/SI_Format.xsd"/>
-	<xs:import namespace="http://www.w3.org/2000/09/xmldsig#"
-	           schemaLocation="https://www.ptb.de/dcc/d-sig/xmldsig-core-schema.xsd"/>
-	<xs:annotation>
-		<xs:documentation> DRMD - Digital Reference Material Document Copyright (c) 2024
-			Bundesanstalt für Materialforschung und -prüfung (BAM) This XML Schema Definition (XSD)
-			is free software: you can redistribute it and/or modify it under the terms of the GNU
-			Lesser General Public License as published by the Free Software Foundation, version 3 of
-			the License. This XSD is distributed in the hope that it will be useful, but WITHOUT ANY
-			WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-			PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details. The
-			development of the Digital Reference Material Document (DRMD) is partially funded and
-			supported by the QI-Digital project. </xs:documentation>
-	</xs:annotation>
 
+    <xs:import namespace="https://ptb.de/dcc"
+               schemaLocation="https://www.ptb.de/dcc/dcc.xsd"/>
+    <xs:import namespace="https://ptb.de/si"
+               schemaLocation="https://ptb.de/si/v2.2.0/SI_Format.xsd"/>
+    <xs:import namespace="http://www.w3.org/2000/09/xmldsig#"
+               schemaLocation="https://www.ptb.de/dcc/d-sig/xmldsig-core-schema.xsd"/>
 
+    <xs:annotation>
+        <xs:documentation>
+            DRMD - Digital Reference Material Document
+            Copyright (c) 2024 Bundesanstalt für Materialforschung und -prüfung (BAM)
 
-	<xs:element name="digitalReferenceMaterialDocument"
-	            type="drmd:digitalReferenceMaterialDocumentType"/>
+            This XML Schema Definition (XSD) is free software: you can redistribute
+            it and/or modify it under the terms of the GNU Lesser General Public License
+            as published by the Free Software Foundation, version 3 of the License.
+            This XSD is distributed in the hope that it will be useful, but WITHOUT ANY
+            WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+            FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for
+            more details. The development of the Digital Reference Material Document (DRMD)
+            is partially funded and supported by the QI-Digital project.
+        </xs:documentation>
+    </xs:annotation>
 
-	<!-- Dedicated Type Section -->
-	<xs:complexType name="digitalReferenceMaterialDocumentType">
-		<xs:annotation>
-			<xs:documentation> The root element that contains the administrative data and
-				measurement results of the DRMD. </xs:documentation>
-		</xs:annotation>
-		<xs:sequence>
-			<xs:element name="administrativeData"
-			            type="drmd:administrativeDataType"/>
-			<xs:element name="materialPropertiesList"
-			            type="drmd:materialPropertiesListType"/>
-			<xs:element name="comment"
-			            minOccurs="0"
-			            type="xs:string"/>
-			<xs:element name="document"
-			            type="dcc:byteDataType"
-			            minOccurs="0"/>
-			<xs:element ref="ds:Signature"
-			            minOccurs="0"
-			            maxOccurs="unbounded"/>
-		</xs:sequence>
-		<xs:attribute name="schemaVersion"
-		              use="required"
-		              type="xs:string"/>
-	</xs:complexType>				
+    <!-- Root element -->
+    <xs:element name="digitalReferenceMaterialDocument"
+                type="drmd:digitalReferenceMaterialDocumentType"/>
 
-	<xs:complexType name="administrativeDataType">
-		<xs:annotation>
-			<xs:documentation> Contains core data, materials, producer information, responsible persons,
-				and statements related to the DRMD. </xs:documentation>
-		</xs:annotation>
-		<xs:all>
-			<xs:element name="coreData"
-			            type="drmd:coreDataType"/>
-			<xs:element name="materials"
-			            type="drmd:materialListType"/>
-			<xs:element name="referenceMaterialProducer"
-			            type="drmd:referenceMaterialProducerType"/>
-			<xs:element name="respPersons"
-			            type="dcc:respPersonListType"/>
-			<xs:element name="statements"
-			            type="drmd:statementListType"
-			            minOccurs="0"/>
-		</xs:all>
-	</xs:complexType>
+    <!-- Root type -->
+    <xs:complexType name="digitalReferenceMaterialDocumentType">
+        <xs:annotation>
+            <xs:documentation>
+                The root element that contains administrative data, materials,
+                measurement results, and signatures of the DRMD.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:sequence>
+            <!-- administrativeData no longer holds <materials> -->
+            <xs:element name="administrativeData"
+                        type="drmd:administrativeDataType"/>
+            <!-- moved to root -->
+            <xs:element name="materials"
+                        type="drmd:materialListType"/>
+            <xs:element name="materialPropertiesList"
+                        type="drmd:materialPropertiesListType"/>
+            <xs:element name="statements"
+                        type="drmd:statementListType"/>
+            <xs:element name="comment"
+                        type="xs:string" minOccurs="0"/>
+            <xs:element name="document"
+                        type="dcc:byteDataType" minOccurs="0"/>
+            <xs:element ref="ds:Signature"
+                        minOccurs="0" maxOccurs="unbounded"/>
+        </xs:sequence>
+        <xs:attribute name="schemaVersion"
+                      type="xs:string"
+                      use="required"/>
+    </xs:complexType>
+
+    <!-- administrativeData without materials -->
+    <xs:complexType name="administrativeDataType">
+        <xs:annotation>
+            <xs:documentation>
+                Contains core data, producer information, responsible persons,
+                and statements related to the DRMD.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:all>
+            <xs:element name="coreData"
+                        type="drmd:coreDataType"/>
+            <xs:element name="referenceMaterialProducer"
+                        type="drmd:referenceMaterialProducerType"/>
+            <xs:element name="respPersons"
+                        type="dcc:respPersonListType"/>
+        </xs:all>
+    </xs:complexType>
+
 	<xs:complexType name="coreDataType">
 		<xs:annotation>
 			<xs:documentation> Contains the core information about the document, such as title,
@@ -178,6 +187,7 @@
 		              type="dcc:refTypesType"
 		              use="optional"/>
 	</xs:complexType>
+
 	<xs:complexType name="referenceMaterialProducerType">
 		<xs:annotation>
 			<xs:documentation> Contains information about the producer of the reference material,
@@ -199,39 +209,47 @@
 			            minOccurs="0"/>
 		</xs:sequence>
 	</xs:complexType>
-	<xs:complexType name="materialListType">
-		<xs:annotation>
-			<xs:documentation> A list of materials included in the DRMD, each with specific details. </xs:documentation>
-		</xs:annotation>
-		<xs:sequence>
-			<xs:element name="material"
-			            type="drmd:materialType"
-			            maxOccurs="unbounded"/>
-		</xs:sequence>
-	</xs:complexType>
-	<xs:complexType name="materialType">
-		<xs:annotation>
-			<xs:documentation> Details about an individual materials in the DRMD, including name,
-				description, and sample size. </xs:documentation>
-		</xs:annotation>
-		<xs:sequence>
-			<xs:element name="name"
-			            type="dcc:textType"/>
-			<xs:element name="description"
-			            type="dcc:richContentType"
-			            minOccurs="0"/>
-			<xs:element name="materialClass"
-			            type="drmd:materialClassType"
-			            minOccurs="0" maxOccurs="unbounded" />		
-			<xs:element name="minimumSampleSize"
-			            type="dcc:itemQuantityListType"/>
-			<xs:element name="itemQuantities"
-			            type="dcc:itemQuantityListType"
-			            minOccurs="0"/>
-			<xs:element name="identifications"
-			            type="drmd:identificationListType"/>
-		</xs:sequence>
-	</xs:complexType>
+    
+    <!-- materialListType moved to root as <materials> -->
+    <xs:complexType name="materialListType">
+        <xs:annotation>
+            <xs:documentation>
+                A list of materials included in the DRMD, each with details.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:sequence>
+            <xs:element name="material"
+                        type="drmd:materialType"
+                        maxOccurs="unbounded"/>
+        </xs:sequence>
+    </xs:complexType>
+
+    <!-- materialType now includes materialClass as a subelement -->
+    <xs:complexType name="materialType">
+        <xs:annotation>
+            <xs:documentation>
+                Details about an individual material in the DRMD, including
+                name, description, class, and sample sizes.
+            </xs:documentation>
+        </xs:annotation>
+        <xs:sequence>
+            <xs:element name="name" type="dcc:textType"/>
+            <xs:element name="description"
+                        type="dcc:richContentType"
+                        minOccurs="0"/>
+            <xs:element name="materialClass"
+                        type="drmd:materialClassType"
+                        minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="minimumSampleSize"
+                        type="dcc:itemQuantityListType"/>
+            <xs:element name="itemQuantities"
+                        type="dcc:itemQuantityListType"
+                        minOccurs="0"/>
+            <xs:element name="identifications"
+                        type="drmd:identificationListType"/>
+        </xs:sequence>
+    </xs:complexType>
+
 
 	<xs:complexType name="statementListType">
 		<xs:annotation>
