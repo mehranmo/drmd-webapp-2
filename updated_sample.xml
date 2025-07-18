@@ -1,0 +1,69 @@
+<drmd:digitalReferenceMaterialDocument xmlns:drmd="https://example.org/drmd" xmlns:dcc="https://ptb.de/dcc" xmlns:si="https://ptb.de/si" schemaVersion="0.2.0">
+  <administrativeData>
+    <coreData>
+      <titleOfTheDocument>referenceMaterialCertificate</titleOfTheDocument>
+      <uniqueIdentifier>1234</uniqueIdentifier>
+      <documentIdentifiers>
+        <documentIdentifier>
+          <scheme>DOI</scheme>
+          <value>10.1234/example</value>
+          <link>https://doi.org/10.1234/example</link>
+        </documentIdentifier>
+      </documentIdentifiers>
+      <validity><untilRevoked>true</untilRevoked></validity>
+    </coreData>
+    <referenceMaterialProducer>
+      <name><dcc:content xmlns:dcc="https://ptb.de/dcc">ACME</dcc:content></name>
+      <contact/>
+      <organizationIdentifiers>
+        <organizationIdentifier>
+          <scheme>VAT</scheme>
+          <value>DE123456789</value>
+        </organizationIdentifier>
+      </organizationIdentifiers>
+    </referenceMaterialProducer>
+    <respPersons/>
+  </administrativeData>
+  <materials>
+    <material>
+      <name><dcc:content xmlns:dcc="https://ptb.de/dcc">Material A</dcc:content></name>
+      <minimumSampleSize><dcc:itemQuantity xmlns:dcc="https://ptb.de/dcc"><si:realListXMLList xmlns:si="https://ptb.de/si"><si:valueXMLList>1</si:valueXMLList><si:unitXMLList>g</si:unitXMLList></si:realListXMLList></dcc:itemQuantity></minimumSampleSize>
+      <materialIdentifiers>
+        <materialIdentifier>
+          <scheme>Lot</scheme>
+          <value>A001</value>
+        </materialIdentifier>
+      </materialIdentifiers>
+    </material>
+  </materials>
+  <materialPropertiesList>
+    <materialProperties>
+      <name><dcc:content xmlns:dcc="https://ptb.de/dcc">Set1</dcc:content></name>
+      <results>
+        <dcc:result xmlns:dcc="https://ptb.de/dcc">
+          <dcc:name><dcc:content>Result1</dcc:content></dcc:name>
+          <dcc:data>
+            <dcc:list>
+              <drmd:quantity>
+                <dcc:quantity refType="basic_measuredValue">
+                  <dcc:name><dcc:content>Mass</dcc:content></dcc:name>
+                  <si:real xmlns:si="https://ptb.de/si">
+                    <si:value>1.0</si:value>
+                    <si:unit>g</si:unit>
+                  </si:real>
+                </dcc:quantity>
+                <drmd:propertyIdentifiers>
+                  <drmd:propertyIdentifier>
+                    <scheme>ID</scheme>
+                    <value>mass-1</value>
+                  </drmd:propertyIdentifier>
+                </drmd:propertyIdentifiers>
+              </drmd:quantity>
+            </dcc:list>
+          </dcc:data>
+        </dcc:result>
+      </results>
+    </materialProperties>
+  </materialPropertiesList>
+  <statements/>
+</drmd:digitalReferenceMaterialDocument>

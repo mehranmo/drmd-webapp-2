@@ -33,9 +33,7 @@ DEFAULT_XSD_PATH = "./drmd.xsd"
 DEFAULT_XSL_PATH = "./drmd.xsl"
 DS_NS = "http://www.w3.org/2000/09/xmldsig#"
 ALLOWED_TITLES = ["referenceMaterialCertificate", "productInformationSheet"]  # default first
-ALLOWED_ISSUERS = ["referenceMaterialProducer", "customer", "owner", "other"]
-
-INIT_IDENT = {"issuer": "referenceMaterialProducer", "value": "", "idName": ""}
+INIT_ID = {"scheme": "", "value": "", "link": ""}
 DEFAULT_PRODUCER = {
     "producerName": "",
     "producerStreet": "",
@@ -45,7 +43,8 @@ DEFAULT_PRODUCER = {
     "producerCountryCode": "",
     "producerPhone": "",
     "producerFax": "",
-    "producerEmail": ""
+    "producerEmail": "",
+    "organizationIdentifiers": [INIT_ID.copy()]
 }
 DEFAULT_PERSON = {
     "personName": "",
@@ -220,8 +219,9 @@ def create_empty_result():
         "description": "",
         "quantities": pd.DataFrame(columns=[
             "Name", "Label", "Value", "Quantity Kind", "Unit",
-            "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution",
+            "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution", "Identifier"
         ]),
+        "identifiers": [],
     }
 
 # -----------------------------------------------------------------------------
@@ -280,21 +280,30 @@ def load_xml_into_state(xml_bytes: bytes):
                     except ValueError:
                         st.session_state.specific_time = date.today()
 
-        # Load identifications
-        idents = []
-        for ident_elem in root.findall(".//drmd:identifications/drmd:identification", ns):
-            issuer = ident_elem.find("drmd:issuer", ns)
-            value = ident_elem.find("drmd:value", ns)
-            name_elem = ident_elem.find("drmd:name/dcc:content", ns)
-            idents.append({
-                "issuer": issuer.text.strip() if issuer is not None and issuer.text else "referenceMaterialProducer",
+        # Load document identifiers (new style)
+        dids = []
+        for did in root.findall(".//drmd:documentIdentifiers/drmd:documentIdentifier", ns):
+            scheme = did.find("drmd:scheme", ns)
+            value = did.find("drmd:value", ns)
+            link_elem = did.find("drmd:link", ns)
+            dids.append({
+                "scheme": scheme.text.strip() if scheme is not None and scheme.text else "",
                 "value": value.text.strip() if value is not None and value.text else "",
-                "idName": " ".join(name_elem.text.split()) if name_elem is not None and name_elem.text else ""
+                "link": link_elem.text.strip() if link_elem is not None and link_elem.text else ""
             })
-        if idents:
-            st.session_state.identifications = idents
-        else:
-            st.session_state.identifications = [INIT_IDENT.copy()]
+        if not dids:
+            legacy_ident = root.find(".//drmd:identifications/drmd:identification", ns)
+            if legacy_ident is not None:
+                issuer = legacy_ident.find("drmd:issuer", ns)
+                val_elem = legacy_ident.find("drmd:value", ns)
+                dids = [{
+                    "scheme": issuer.text.strip() if issuer is not None and issuer.text else "",
+                    "value": val_elem.text.strip() if val_elem is not None and val_elem.text else "",
+                    "link": ""
+                }]
+            else:
+                dids = [INIT_ID.copy()]
+        st.session_state.documentIdentifiers = dids
 
         # Load Producers
         prods = []
@@ -314,6 +323,16 @@ def load_xml_into_state(xml_bytes: bytes):
                 phone = contact_elem.find("dcc:phone", ns).text.strip() if contact_elem.find("dcc:phone", ns) is not None and contact_elem.find("dcc:phone", ns).text else ""
                 fax = contact_elem.find("dcc:fax", ns).text.strip() if contact_elem.find("dcc:fax", ns) is not None and contact_elem.find("dcc:fax", ns).text else ""
                 email = contact_elem.find("dcc:eMail", ns).text.strip() if contact_elem.find("dcc:eMail", ns) is not None and contact_elem.find("dcc:eMail", ns).text else ""
+            org_ids = []
+            for oid in prod_elem.findall("drmd:organizationIdentifiers/drmd:organizationIdentifier", ns):
+                sch = oid.find("drmd:scheme", ns)
+                val = oid.find("drmd:value", ns)
+                link = oid.find("drmd:link", ns)
+                org_ids.append({
+                    "scheme": sch.text.strip() if sch is not None and sch.text else "",
+                    "value": val.text.strip() if val is not None and val.text else "",
+                    "link": link.text.strip() if link is not None and link.text else ""
+                })
             prods.append({
                 "producerName": name_elem.text.strip() if name_elem is not None and name_elem.text else "",
                 "producerStreet": street,
@@ -323,7 +342,8 @@ def load_xml_into_state(xml_bytes: bytes):
                 "producerCountryCode": country,
                 "producerPhone": phone,
                 "producerFax": fax,
-                "producerEmail": email
+                "producerEmail": email,
+                "organizationIdentifiers": org_ids or [INIT_ID.copy()]
             })
         if prods:
             st.session_state.producers = prods
@@ -373,23 +393,22 @@ def load_xml_into_state(xml_bytes: bytes):
                 "minimumSampleSize": sample_elem.text.strip() if sample_elem is not None and sample_elem.text else "",
                 "itemQuantities": "",
                 "isCertified": mat_elem.get("isCertified", "false").lower() == "true",
-                "identifications": []
+                "materialIdentifiers": []
             }
 
-            # Load material identifications
-            for mid in mat_elem.findall(".//drmd:identifications/drmd:identification", ns):
-                issuer = mid.find("drmd:issuer", ns)
-                value = mid.find("drmd:value", ns)
-                name_elem = mid.find("drmd:name/dcc:content", ns)
-
-                mat["identifications"].append({
-                    "issuer": issuer.text.strip() if issuer is not None and issuer.text else "referenceMaterialProducer",
-                    "idName": name_elem.text.strip() if name_elem is not None and name_elem.text else "",
-                    "value": value.text.strip() if value is not None and value.text else ""
+            # Load material identifiers
+            for mid in mat_elem.findall("drmd:materialIdentifiers/drmd:materialIdentifier", ns):
+                sch = mid.find("drmd:scheme", ns)
+                val = mid.find("drmd:value", ns)
+                link_elem = mid.find("drmd:link", ns)
+                mat["materialIdentifiers"].append({
+                    "scheme": sch.text.strip() if sch is not None and sch.text else "",
+                    "value": val.text.strip() if val is not None and val.text else "",
+                    "link": link_elem.text.strip() if link_elem is not None and link_elem.text else ""
                 })
 
-            if not mat["identifications"]:
-                mat["identifications"].append(INIT_IDENT.copy())
+            if not mat["materialIdentifiers"]:
+                mat["materialIdentifiers"].append(INIT_ID.copy())
 
             mats.append(mat)
 
@@ -398,7 +417,7 @@ def load_xml_into_state(xml_bytes: bytes):
         else:
             st.session_state.materials = [{"uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
                                           "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
-                                          "identifications": [INIT_IDENT.copy()]}]
+                                          "materialIdentifiers": [INIT_ID.copy()]}]
 
         # Load Statements
         official_keys = ["intendedUse", "commutability", "storageInformation",
@@ -463,12 +482,14 @@ def load_xml_into_state(xml_bytes: bytes):
                         res_dict["description"] = clean_text(res_desc_elem.text) if res_desc_elem is not None and res_desc_elem.text else ""
                         # Quantities
                         quantities = []
+                        row_ids = []
                         data_elem = res_elem.find("dcc:data", ns)
                         if data_elem is not None:
                             list_elem = data_elem.find("dcc:list", ns)
                             if list_elem is not None:
                                 for quant_elem in list_elem.findall("dcc:quantity", ns):
                                     quant = {}
+                                    q_ids = []
                                     # Get quantity name
                                     qname_elem = quant_elem.find("dcc:name/dcc:content", ns)
                                     quant["Name"] = clean_text(qname_elem.text) if qname_elem is not None and qname_elem.text else ""
@@ -493,10 +514,24 @@ def load_xml_into_state(xml_bytes: bytes):
                                             quant["Coverage Probability"] = float(cp_elem.text.strip()) if cp_elem is not None and cp_elem.text and cp_elem.text.strip().replace('.', '', 1).isdigit() else None
                                             dist_elem = mu_elem.find("si:distribution", ns)
                                             quant["Distribution"] = dist_elem.text.strip() if dist_elem is not None and dist_elem.text else ""
+                                    # property identifiers
+                                    for pid in quant_elem.findall("drmd:propertyIdentifiers/drmd:propertyIdentifier", ns):
+                                        s = pid.find("drmd:scheme", ns)
+                                        v = pid.find("drmd:value", ns)
+                                        l = pid.find("drmd:link", ns)
+                                        q_ids.append({
+                                            "scheme": s.text.strip() if s is not None and s.text else "",
+                                            "value": v.text.strip() if v is not None and v.text else "",
+                                            "link": l.text.strip() if l is not None and l.text else ""
+                                        })
                                     quantities.append(quant)
+                                    row_ids.append(q_ids or [ ])
                         # Convert list of quantities to a DataFrame
-                        df_quant = pd.DataFrame(quantities, columns=["Name", "Label", "Value", "Quantity Type", "Unit", "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution"])
+                        df_quant = pd.DataFrame(quantities, columns=["Name", "Label", "Value", "Quantity Type", "Unit", "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution", "Identifier"])
+                        for i, ids in enumerate(row_ids):
+                            df_quant.loc[i, "Identifier"] = ids[0]["value"] if ids else ""
                         res_dict["quantities"] = df_quant
+                        res_dict["identifiers"] = row_ids
                         results.append(res_dict)
                 mp_dict["results"] = results
                 # Assign a new UUID for internal use
@@ -551,10 +586,10 @@ def load_xml_into_state(xml_bytes: bytes):
 # -----------------------------------------------------------------------------
 # Robust session‑state initialisation (covers all tabs)
 SESSION_DEFAULTS = {
-    "identifications": [INIT_IDENT.copy()],
+    "documentIdentifiers": [INIT_ID.copy()],
     "materials": [{"uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
                     "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
-                    "identifications": [INIT_IDENT.copy()]}],
+                    "materialIdentifiers": [INIT_ID.copy()]}],
     "materialProperties": [],
     "producers": [DEFAULT_PRODUCER.copy()],
     "responsible_persons": [DEFAULT_PERSON.copy()],
@@ -632,32 +667,16 @@ with tabs[0]:
             if st.button("Generate", key="pid_gen", on_click=generate_uuid):
                 pass
 
-        # RM Unique Identifier block (single, non-changeable issuer)
-        st.markdown("")
-        st.markdown("RM unique identifier:")
-
-        # Ensure we have exactly one identification with fixed issuer
-        if not st.session_state.identifications:
-            st.session_state.identifications = [INIT_IDENT.copy()]
-        elif len(st.session_state.identifications) > 1:
-            st.session_state.identifications = [st.session_state.identifications[0]]
-
-        # Force issuer to be referenceMaterialProducer
-        st.session_state.identifications[0]["issuer"] = "referenceMaterialProducer"
-
-        ident = st.session_state.identifications[0]
-        col1, col2, col3 = st.columns([2, 3, 3])
-        with col1:
-            # Disabled selector but keeps the same style
-            st.selectbox("Issuer", ALLOWED_ISSUERS,
-                        index=ALLOWED_ISSUERS.index("referenceMaterialProducer"),
-                        key="single_ident_issuer", disabled=True)
-        with col2:
-            ident["idName"] = st.text_input("RM Name", ident.get("idName", ""), key="single_ident_name")
-        with col3:
-            ident["value"] = st.text_input("RM Code", ident.get("value", ""), key="single_ident_value")
-
-        st.markdown("")
+        st.markdown("#### Document Identifiers")
+        for didx, did in enumerate(st.session_state.documentIdentifiers):
+            cols = st.columns([2, 3, 4, 1])
+            did["scheme"] = cols[0].text_input("Scheme", did.get("scheme", ""), key=f"doc_scheme_{didx}")
+            did["value"] = cols[1].text_input("Value", did.get("value", ""), key=f"doc_value_{didx}")
+            did["link"] = cols[2].text_input("Link", did.get("link", ""), key=f"doc_link_{didx}")
+            if cols[3].button("🗑️", key=f"del_doc_id_{didx}") and len(st.session_state.documentIdentifiers) > 1:
+                st.session_state.documentIdentifiers.pop(didx); st.rerun()
+        if st.button("➕ Add Identifier", key="add_doc_id"):
+            st.session_state.documentIdentifiers.append(INIT_ID.copy()); st.rerun()
 
         # Period of Validity row with new help text
         cols = st.columns([3, 3, 3])
@@ -694,8 +713,8 @@ with tabs[0]:
                         addr_cols = st.columns([3, 1])
                         with addr_cols[0]:
                             prod["producerStreet"] = st.text_input("Street", value=prod.get("producerStreet", ""), key=f"producerStreet_{idx}")
-                        with addr_cols[1]:
-                            prod["producerStreetNo"] = st.text_input("No.", value=prod.get("producerStreetNo", ""), key=f"producerStreetNo_{idx}")
+                    with addr_cols[1]:
+                        prod["producerStreetNo"] = st.text_input("No.", value=prod.get("producerStreetNo", ""), key=f"producerStreetNo_{idx}")
 
                         city_cols = st.columns([1, 2, 1])
                         with city_cols[0]:
@@ -705,6 +724,19 @@ with tabs[0]:
                         with city_cols[2]:
                             prod["producerCountryCode"] = st.text_input("Country", value=prod.get("producerCountryCode", ""), key=f"producerCountryCode_{idx}")
                         prod["producerFax"] = st.text_input("Fax", value=prod.get("producerFax", ""), key=f"producerFax_{idx}")
+
+                    st.markdown("#### Organization Identifiers")
+                    if not prod.get("organizationIdentifiers"):
+                        prod["organizationIdentifiers"] = [INIT_ID.copy()]
+                    for oid_idx, oid in enumerate(prod["organizationIdentifiers"]):
+                        cols_id = st.columns([2,3,4,1])
+                        oid["scheme"] = cols_id[0].text_input("Scheme", oid.get("scheme", ""), key=f"org_scheme_{idx}_{oid_idx}")
+                        oid["value"] = cols_id[1].text_input("Value", oid.get("value", ""), key=f"org_value_{idx}_{oid_idx}")
+                        oid["link"] = cols_id[2].text_input("Link", oid.get("link", ""), key=f"org_link_{idx}_{oid_idx}")
+                        if cols_id[3].button("🗑️", key=f"del_org_{idx}_{oid_idx}") and len(prod["organizationIdentifiers"])>1:
+                            prod["organizationIdentifiers"].pop(oid_idx); st.rerun()
+                    if st.button("➕ Add Identifier", key=f"add_org_{idx}"):
+                        prod["organizationIdentifiers"].append(INIT_ID.copy()); st.rerun()
 
                     # if st.button("Remove", key=f"remove_prod_{idx}"):
                     #     st.session_state.producers.pop(idx)
@@ -760,23 +792,6 @@ with tabs[0]:
                     "cryptElectronicTimeStamp": False
                 })
                 st.rerun()
-def export_administrative_identifications(ns_drmd, ns_dcc):
-    # For identifications, ensure the issuer is valid.
-    idents_elem = ET.Element(f"{{{ns_drmd}}}identifications")
-    for ident in st.session_state.identifications:
-        ident_elem = ET.SubElement(idents_elem, f"{{{ns_drmd}}}identification", attrib={"refType": "basic_certificateIdentification"})
-        # Check the issuer; if it's not allowed, default to "referenceMaterialProducer".
-        issuer_val = ident.get("issuer", "referenceMaterialProducer")
-        if issuer_val not in ALLOWED_ISSUERS:
-            issuer_val = "referenceMaterialProducer"
-        ET.SubElement(ident_elem, f"{{{ns_drmd}}}issuer").text = issuer_val
-        # For the identification value, if empty, default to "N/A".
-        value_text = ident.get("value", "").strip() or "N/A"
-        ET.SubElement(ident_elem, f"{{{ns_drmd}}}value").text = value_text
-        if ident.get("idName", "").strip():
-            name_elem = ET.SubElement(ident_elem, f"{{{ns_drmd}}}name")
-            add_if_valid(name_elem, "content", ident.get("idName", ""), ns_dcc)
-    return idents_elem
 # -----------------------------------------------------------------------------
 # TAB 1 – Materials (unchanged from rev2)
 # -----------------------------------------------------------------------------
@@ -794,31 +809,18 @@ with tabs[1]:
                 mat["minimumSampleSize"] = st.text_input("Minimum Sample Size", mat["minimumSampleSize"], key=f"mat_min_{mat['uuid']}")
                 mat["isCertified"] = st.checkbox("Certified", mat["isCertified"], key=f"mat_cert_{mat['uuid']}")
 
-            st.markdown("Identification")
-            # Ensure material has exactly one identification that copies from administrative data
-            if not mat["identifications"]:
-                mat["identifications"] = [INIT_IDENT.copy()]
-            elif len(mat["identifications"]) > 1:
-                mat["identifications"] = [mat["identifications"][0]]
-
-            # Copy identification from administrative data
-            if st.session_state.identifications:
-                admin_ident = st.session_state.identifications[0]
-                mat["identifications"][0]["issuer"] = admin_ident["issuer"]
-                mat["identifications"][0]["idName"] = admin_ident["idName"]
-                mat["identifications"][0]["value"] = admin_ident["value"]
-
-            # Display as read-only with same style as administrative data
-            mat_ident = mat["identifications"][0]
-            col1, col2, col3 = st.columns([2, 3, 3])
-            with col1:
-                st.selectbox("Issuer", ALLOWED_ISSUERS,
-                           index=ALLOWED_ISSUERS.index("referenceMaterialProducer"),
-                           key=f"mat_{mat['uuid']}_issuer_readonly", disabled=True)
-            with col2:
-                st.text_input("RM Name", value=mat_ident.get("idName", ""), key=f"mat_{mat['uuid']}_name_readonly", disabled=True)
-            with col3:
-                st.text_input("RM Code", value=mat_ident.get("value", ""), key=f"mat_{mat['uuid']}_code_readonly", disabled=True)
+            st.markdown("#### Material Identifiers")
+            if not mat.get("materialIdentifiers"):
+                mat["materialIdentifiers"] = [INIT_ID.copy()]
+            for midx, mid in enumerate(mat["materialIdentifiers"]):
+                cols_id = st.columns([2,3,4,1])
+                mid["scheme"] = cols_id[0].text_input("Scheme", mid.get("scheme", ""), key=f"mat_scheme_{mat['uuid']}_{midx}")
+                mid["value"] = cols_id[1].text_input("Value", mid.get("value", ""), key=f"mat_value_{mat['uuid']}_{midx}")
+                mid["link"] = cols_id[2].text_input("Link", mid.get("link", ""), key=f"mat_link_{mat['uuid']}_{midx}")
+                if cols_id[3].button("🗑️", key=f"del_mat_id_{mat['uuid']}_{midx}") and len(mat["materialIdentifiers"])>1:
+                    mat["materialIdentifiers"].pop(midx); st.rerun()
+            if st.button("➕ Add Identifier", key=f"add_mat_id_{mat['uuid']}"):
+                mat["materialIdentifiers"].append(INIT_ID.copy()); st.rerun()
 
             if st.button("Remove Material", key=f"rm_mat_{mat['uuid']}", disabled=len(st.session_state.materials)==1):
                 st.session_state.materials.pop(i); st.rerun()
@@ -827,7 +829,7 @@ with tabs[1]:
         st.session_state.materials.append({
             "uuid": str(uuid.uuid4()), "name": "", "description": "", "materialClass": "",
             "minimumSampleSize": "", "itemQuantities": "", "isCertified": False,
-            "identifications": [INIT_IDENT.copy()],
+            "materialIdentifiers": [INIT_ID.copy()],
         }); st.rerun()
 
 # -----------------------------------------------------------------------------
@@ -881,15 +883,37 @@ with tabs[2]:
                         with st.form(key=f"res_form_{mp_uuid}_{res_idx}"):
                             result["result_name"] = st.text_input("Name", value=result.get("result_name", ""), key=f"res_name_{mp_uuid}_{res_idx}")
                             result["description"] = st.text_area("Description", value=result.get("description", ""), key=f"res_desc_{mp_uuid}_{res_idx}")
-                            # Use data_editor for the quantities DataFrame.
+                            if "identifiers" not in result:
+                                result["identifiers"] = [ [] for _ in range(len(result.get("quantities", pd.DataFrame()))) ]
                             result["quantities"] = st.data_editor(
                                 result.get("quantities", pd.DataFrame(columns=[
                                     "Name", "Label", "Value", "Quantity Kind", "Unit",
-                                    "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution"
+                                    "Uncertainty", "Coverage Factor", "Coverage Probability", "Distribution", "Identifier"
                                 ])),
                                 num_rows="dynamic",
+                                disabled=["Identifier"],
                                 key=f"quantities_{mp_uuid}_{res_idx}"
                             )
+                            # Sync identifier rows with dataframe length
+                            qlen = len(result["quantities"])
+                            if len(result["identifiers"]) < qlen:
+                                result["identifiers"] += [[ ] for _ in range(qlen - len(result["identifiers"]))]
+                            elif len(result["identifiers"]) > qlen:
+                                result["identifiers"] = result["identifiers"][:qlen]
+
+                            sel = st.number_input("Row #", min_value=0, max_value=max(0, qlen-1), key=f"row_sel_{mp_uuid}_{res_idx}", step=1)
+                            current_ids = result["identifiers"][sel]
+                            for pid_idx, pid in enumerate(current_ids):
+                                cols_id = st.columns([2,3,4,1])
+                                pid["scheme"] = cols_id[0].text_input("Scheme", pid.get("scheme", ""), key=f"prop_scheme_{mp_uuid}_{res_idx}_{pid_idx}")
+                                pid["value"] = cols_id[1].text_input("Value", pid.get("value", ""), key=f"prop_value_{mp_uuid}_{res_idx}_{pid_idx}")
+                                pid["link"] = cols_id[2].text_input("Link", pid.get("link", ""), key=f"prop_link_{mp_uuid}_{res_idx}_{pid_idx}")
+                                if cols_id[3].button("🗑️", key=f"del_prop_{mp_uuid}_{res_idx}_{pid_idx}") and len(current_ids)>1:
+                                    current_ids.pop(pid_idx); st.rerun()
+                            if st.button("➕ Add Identifier", key=f"add_prop_{mp_uuid}_{res_idx}"):
+                                current_ids.append(INIT_ID.copy()); st.rerun()
+                            result["identifiers"][sel] = current_ids
+                            result["quantities"].loc[sel, "Identifier"] = current_ids[0]["value"] if current_ids else ""
 
                             # Default uncertainty controls in one line under the table
                             st.markdown("**Default Uncertainty Values:**")
@@ -956,6 +980,17 @@ def add_if_valid(parent, tag, value, ns):
     elem = ET.SubElement(parent, f"{{{ns}}}{tag}")
     elem.text = str(value).strip()
     return elem
+
+def export_identifier_list(parent, tag, id_list, ns_drmd):
+    outer = ET.SubElement(parent, f"{{{ns_drmd}}}{tag}")
+    singular = tag[:-1] if tag.endswith('s') else tag
+    for ident in id_list:
+        ident_elem = ET.SubElement(outer, f"{{{ns_drmd}}}{singular}")
+        ET.SubElement(ident_elem, f"{{{ns_drmd}}}scheme").text = ident.get("scheme", "")
+        ET.SubElement(ident_elem, f"{{{ns_drmd}}}value").text = ident.get("value", "")
+        if ident.get("link", "").strip():
+            ET.SubElement(ident_elem, f"{{{ns_drmd}}}link").text = ident.get("link", "")
+    return outer
 
 # def export_materialProperties(ns_drmd, ns_dcc, ns_si):
 #     # Create the wrapping element for materialPropertiesList.
@@ -1045,8 +1080,9 @@ def export_materialProperties(ns_drmd, ns_dcc, ns_si):
                 ET.SubElement(res_desc_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = res.get("description", "")
             data_elem = ET.SubElement(res_elem, f"{{{ns_dcc}}}data")
             list_elem = ET.SubElement(data_elem, f"{{{ns_dcc}}}list")
-            for _, row in res.get("quantities", pd.DataFrame()).iterrows():
-                quantity_elem = ET.SubElement(list_elem, f"{{{ns_dcc}}}quantity", attrib={"refType": "basic_measuredValue"})
+            for q_idx, row in res.get("quantities", pd.DataFrame()).iterrows():
+                q_wrap = ET.SubElement(list_elem, f"{{{ns_drmd}}}quantity")
+                quantity_elem = ET.SubElement(q_wrap, f"{{{ns_dcc}}}quantity", attrib={"refType": "basic_measuredValue"})
                 qname_elem = ET.SubElement(quantity_elem, f"{{{ns_dcc}}}name")
                 ET.SubElement(qname_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = str(row.get("Name", ""))
                 real_elem = ET.SubElement(quantity_elem, f"{{{ns_si}}}real")
@@ -1069,6 +1105,8 @@ def export_materialProperties(ns_drmd, ns_dcc, ns_si):
                     expMU_elem = ET.SubElement(mu_elem, f"{{{ns_si}}}expandedMU")
                     for tag, value in expandedMU_vals.items():
                         ET.SubElement(expMU_elem, f"{{{ns_si}}}{tag}").text = str(value)
+                if res.get("identifiers") and q_idx < len(res["identifiers"]):
+                    export_identifier_list(q_wrap, "propertyIdentifiers", res["identifiers"][q_idx], ns_drmd)
     return mp_list_elem
 
 
@@ -1282,24 +1320,16 @@ with tabs[6]:
         ET.register_namespace("ds", DS_NS)
 
         # Create the root element.
-        root = ET.Element(f"{{{ns_drmd}}}digitalReferenceMaterialDocument", attrib={"schemaVersion": "0.1.1"})
+        root = ET.Element(f"{{{ns_drmd}}}digitalReferenceMaterialDocument", attrib={"schemaVersion": "0.2.0"})
 
         # --- Build administrativeData ---
         admin_data = ET.SubElement(root, f"{{{ns_drmd}}}administrativeData")
-        # coreData: title, uniqueIdentifier, identifications, validity.
+        # coreData: title, uniqueIdentifier, documentIdentifiers, validity.
         core_data = ET.SubElement(admin_data, f"{{{ns_drmd}}}coreData")
         ET.SubElement(core_data, f"{{{ns_drmd}}}titleOfTheDocument").text = st.session_state.title_option
         ET.SubElement(core_data, f"{{{ns_drmd}}}uniqueIdentifier").text = st.session_state.persistent_id_value
-        if st.session_state.identifications:
-            idents_elem = ET.SubElement(core_data, f"{{{ns_drmd}}}identifications")
-            for ident in st.session_state.identifications:
-                ident_elem = ET.SubElement(idents_elem, f"{{{ns_drmd}}}identification", attrib={"refType": "basic_certificateIdentification"})
-                ET.SubElement(ident_elem, f"{{{ns_drmd}}}issuer").text = ident["issuer"]
-                # If identification value is empty, default to "N/A"
-                ET.SubElement(ident_elem, f"{{{ns_drmd}}}value").text = (ident["value"].strip() or "N/A")
-                if (ident["idName"] or "").strip():
-                    name_elem = ET.SubElement(ident_elem, f"{{{ns_drmd}}}name")
-                    ET.SubElement(name_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = ident["idName"]
+        if st.session_state.documentIdentifiers:
+            export_identifier_list(core_data, "documentIdentifiers", st.session_state.documentIdentifiers, ns_drmd)
         # Validity (simplified example)
         validity_elem = ET.SubElement(core_data, f"{{{ns_drmd}}}validity")
         if st.session_state.validity_type == "Time After Dispatch":
@@ -1343,16 +1373,8 @@ with tabs[6]:
                     dummy_rl = ET.SubElement(dummy_item, f"{{{ns_si}}}realListXMLList")
                     ET.SubElement(dummy_rl, f"{{{ns_si}}}valueXMLList").text = material.get("itemQuantities", "")
                     ET.SubElement(dummy_rl, f"{{{ns_si}}}unitXMLList").text = ""
-                # identifications (required)
-                ident_elem = ET.SubElement(mat_elem, f"{{{ns_drmd}}}identifications")
-                ident = material.get("identification", {"issuer": "referenceMaterialProducer", "value": "", "idName": ""})
-                ident_value = (ident.get("value", "").strip() or "N/A")
-                ident_entry = ET.SubElement(ident_elem, f"{{{ns_drmd}}}identification")
-                ET.SubElement(ident_entry, f"{{{ns_drmd}}}issuer").text = ident.get("issuer", "referenceMaterialProducer")
-                ET.SubElement(ident_entry, f"{{{ns_drmd}}}value").text = ident_value
-                if (ident.get("idName", "") or "").strip():
-                    idname_elem = ET.SubElement(ident_entry, f"{{{ns_drmd}}}name")
-                    ET.SubElement(idname_elem, f"{{{ns_dcc}}}content", attrib={"lang": "en"}).text = ident.get("idName", "")
+                if material.get("materialIdentifiers"):
+                    export_identifier_list(mat_elem, "materialIdentifiers", material["materialIdentifiers"], ns_drmd)
 
         # Reference Material Producer
         if not st.session_state.producers:
@@ -1384,8 +1406,10 @@ with tabs[6]:
                         ET.SubElement(location_elem, f"{{{ns_dcc}}}postCode").text = prod.get("producerPostCode", "")
                     if (prod.get("producerCity", "") or "").strip():
                         ET.SubElement(location_elem, f"{{{ns_dcc}}}city").text = prod.get("producerCity", "")
-                    if (prod.get("producerCountryCode", "") or "").strip():
+                if (prod.get("producerCountryCode", "") or "").strip():
                         ET.SubElement(location_elem, f"{{{ns_dcc}}}countryCode").text = prod.get("producerCountryCode", "")
+                if prod.get("organizationIdentifiers"):
+                    export_identifier_list(prod_elem, "organizationIdentifiers", prod["organizationIdentifiers"], ns_drmd)
 
         # Responsible Persons
         if not st.session_state.responsible_persons:
@@ -1512,10 +1536,10 @@ with tabs[-1]:
                 "Certificate—metadata, materials, measurement properties, statements, signatures, and export.")
 
     st.markdown("#### Main Sections  \n"
-                "- **Administrative Data**: Document title, persistent identifier, unique RM identifiers, validity, "
+                "- **Administrative Data**: Document title, persistent identifier, document identifiers, validity, "
                 "producer and responsible-person details.  \n"
                 "- **Materials** (formerly “Items”): Define one or more materials, their class, sample size, quantities "
-                "and RM identifications.  \n"
+                "and material identifiers.  \n"
                 "- **Properties**: Specify measurement-property sets, certified values, uncertainties, and units.  \n"
                 "- **Statements**: Capture official statements (intended use, traceability, safety, etc.) and add any custom notes.  \n"
                 "- **Comments & Documents**: Attach external files or free-form remarks.  \n"
@@ -1527,8 +1551,8 @@ with tabs[-1]:
                 "All fields map 1:1 to elements in **drmd.xsd** (version in `/drmd.xsd`). "
                 "Key top-level XML elements are:  \n"
                 "- `<digitalReferenceMaterialDocument>` (root)  \n"
-                "- `<administrativeData>`: contains `<titleOfTheDocument>`, `<persistentIdentifier>`, `<identifications>`, `<validity>`, `<referenceMaterialProducer>`, `<respPersons>`  \n"
-                "- `<materials>` _(the former `<items>` element)_ with child `<material>` entries: `<name>`, `<description>`, `<materialClass>`, `<minimumSampleSize>`, `<itemQuantities>`, `<identification>`, `<isCertified>`  \n"
+                "- `<administrativeData>`: contains `<titleOfTheDocument>`, `<persistentIdentifier>`, `<documentIdentifiers>`, `<validity>`, `<referenceMaterialProducer>`, `<respPersons>`  \n"
+                "- `<materials>` _(the former `<items>` element)_ with child `<material>` entries: `<name>`, `<description>`, `<materialClass>`, `<minimumSampleSize>`, `<itemQuantities>`, `<materialIdentifiers>`, `<isCertified>`  \n"
                 "- `<measurementResults>`: holds `<materialProperty>` sets, `<result>` elements, and `<quantities>` tables.  \n"
                 "- `<statements>`: wraps official and custom statements.  \n"
                 "- `<ds:Signature>`: optional XML Digital Signature nodes.")
