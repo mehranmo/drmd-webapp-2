@@ -897,12 +897,23 @@ with tabs[2]:
                             # Sync identifier rows with dataframe length
                             qlen = len(result["quantities"])
                             if len(result["identifiers"]) < qlen:
-                                result["identifiers"] += [[ ] for _ in range(qlen - len(result["identifiers"]))]
+                                result["identifiers"] += [[] for _ in range(qlen - len(result["identifiers"]))]
                             elif len(result["identifiers"]) > qlen:
                                 result["identifiers"] = result["identifiers"][:qlen]
 
-                            sel = st.number_input("Row #", min_value=0, max_value=max(0, qlen-1), key=f"row_sel_{mp_uuid}_{res_idx}", step=1)
-                            current_ids = result["identifiers"][sel]
+                            sel = st.number_input(
+                                "Row #",
+                                min_value=0,
+                                max_value=max(0, qlen - 1),
+                                key=f"row_sel_{mp_uuid}_{res_idx}",
+                                step=1,
+                            )
+
+                            if qlen == 0:
+                                st.info("Add quantity rows to edit identifiers.")
+                                current_ids = []
+                            else:
+                                current_ids = result["identifiers"][sel]
                             for pid_idx, pid in enumerate(current_ids):
                                 cols_id = st.columns([2,3,4,1])
                                 pid["scheme"] = cols_id[0].text_input("Scheme", pid.get("scheme", ""), key=f"prop_scheme_{mp_uuid}_{res_idx}_{pid_idx}")
